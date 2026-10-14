@@ -1,21 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Video, VideoPlayer, VideoSkin } from "@videojs/react/video";
+import "@videojs/react/video/skin.css";
 import { useSession } from "../App";
 import { api } from "../api/client";
-import { formatTime } from "../components/ItemCard";
 
-/** How often playback position is reported to the server. */
-const PROGRESS_INTERVAL_MS = 15_000;
-
-/**
- * Video player.
- *
- * The `<video>` element is owned by React here rather than living outside the
- * tree: it appears only on the player screen, so React's normal lifecycle is
- * correct and there is no cross-tree coordination to get wrong.
- *
- * Position is reported on an interval rather than on every `timeupdate`, which
- * fires several times a second.
- */
 export function Player({
   itemId,
   title,
@@ -27,82 +15,48 @@ export function Player({
 }) {
   const { session } = useSession();
   const userId = session?.user.Id ?? "";
-
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const startedRef = useRef(false);
-
-  const [duration, setDuration] = useState(0);
-  const [position, setPosition] = useState(0);
-  const [buffered, setBuffered] = useState(0);
-  const [paused, setPaused] = useState(false);
-  const [volume, setVolume] = useState(1);
-  const [muted, setMuted] = useState(false);
+  const [startPosition, setStartPosition] = useState<number | null>(null);
   const [error, setError] = useState("");
-
-  // Latest known position, readable from the interval callback without
-  // re-creating it on every timeupdate.
   const positionRef = useRef(0);
-  positionRef.current = position;
+  const startedRef = useRef(false);
+  const pausedRef = useRef(false);
+  const playbackStartedRef = useRef(false);
 
-  /** Seconds to resume from, for this user only. */
-  async function resolveStartPosition(): Promise<number> {
-    try {
-      const item = await api.item(userId, itemId);
-      const resume = item.UserData?.PlaybackPositionTicks ?? 0;
-      const runtime = item.RunTimeTicks ?? 0;
-      // Effectively finished: start over rather than at the credits.
-      if (runtime && resume >= runtime * 0.98) return 0;
-      return resume / 10_000_000;
-    } catch {
-      return 0;
-    }
-  }
-
-  // Load and resume.
   useEffect(() => {
     let cancelled = false;
 
-    (async () => {
-      try {
-        const start = await resolveStartPosition();
-        if (cancelled || !videoRef.current) return;
-
-        videoRef.current.currentTime = start;
-        setPosition(start);
-
-        await api.reportPlaybackStart(itemId, Math.round(start * 10_000_000), `jf-${itemId.slice(0, 8)}`);
-        await videoRef.current.play().catch(() => {
-          // Autoplay can be blocked; the user can press play.
-          setPaused(true);
-        });
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      }
-    })();
+    void api
+      .item(userId, itemId)
+      .then((item) => {
+        const resume = item.UserData?.PlaybackPositionTicks ?? 0;
+        const runtime = item.RunTimeTicks ?? 0;
+        const start = runtime && resume >= runtime * 0.98 ? 0 : resume / 10_000_000;
+        if (!cancelled) {
+          positionRef.current = start;
+          setStartPosition(start);
+        }
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : String(err));
+        setStartPosition(0);
+      });
 
     return () => {
       cancelled = true;
     };
-    // Intentionally keyed on itemId only: re-running on session changes would
-    // restart playback mid-view.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [itemId]);
+  }, [itemId, userId]);
 
-  // Report progress periodically.
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (paused || !videoRef.current) return;
+      if (!startedRef.current || pausedRef.current) return;
       void api
         .reportProgress(itemId, Math.round(positionRef.current * 10_000_000), false)
-        .catch(() => {
-          // Best-effort: a dropped progress ping must not disturb playback.
-        });
-    }, PROGRESS_INTERVAL_MS);
-
+        .catch(() => {});
+    }, 15_000);
     return () => window.clearInterval(timer);
-  }, [itemId, paused]);
+  }, [itemId]);
 
-  // Report the final position when leaving.
   useEffect(() => {
     return () => {
       if (!startedRef.current) return;
@@ -112,111 +66,64 @@ export function Player({
     };
   }, [itemId]);
 
-  const togglePlay = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (video.paused) void video.play();
-    else video.pause();
-  }, []);
-
-  function seekTo(event: React.MouseEvent<HTMLDivElement>) {
-    const video = videoRef.current;
-    if (!video || !duration) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const fraction = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-    video.currentTime = fraction * duration;
-  }
-
-  function skip(seconds: number) {
-    const video = videoRef.current;
-    if (!video) return;
-    video.currentTime = Math.min(duration, Math.max(0, video.currentTime + seconds));
-  }
-
-  const played = duration > 0 ? (position / duration) * 100 : 0;
-  const bufferedPct = duration > 0 ? (buffered / duration) * 100 : 0;
-
   return (
-    <div className="player">
-      <video
-        ref={videoRef}
-        className="video"
-        playsInline
-        onLoadedMetadata={(e) => {
-          setDuration(e.currentTarget.duration || 0);
-          startedRef.current = true;
-        }}
-        onTimeUpdate={(e) => setPosition(e.currentTarget.currentTime)}
-        onProgress={(e) => {
-          const ranges = e.currentTarget.buffered;
-          setBuffered(ranges.length ? ranges.end(ranges.length - 1) : 0);
-        }}
-        onPlay={() => setPaused(false)}
-        onPause={() => setPaused(true)}
-        onEnded={() => setPaused(true)}
-        onError={() => setError("This item could not be played.")}
+    <div className="player-stage">
+      <button
+        type="button"
+        className="player-close"
+        aria-label="Close player"
+        title="Close player"
+        onClick={onClose}
       >
-        <source src={api.streamUrl(itemId)} />
-        Your browser cannot play this file.
-      </video>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m6 6 12 12M18 6 6 18" />
+        </svg>
+      </button>
 
-      {error && <p className="error">{error}</p>}
-
-      <div className="player-bar">
-        <button type="button" className="primary compact" onClick={togglePlay}>
-          {paused ? "▶" : "❚❚"}
-        </button>
-
-        <span className="time">{formatTime(position)}</span>
-
-        <div
-          className="scrub"
-          onClick={seekTo}
-          role="slider"
-          aria-label="Seek"
-          aria-valuemin={0}
-          aria-valuemax={Math.floor(duration)}
-          aria-valuenow={Math.floor(position)}
-          tabIndex={0}
-        >
-          <div className="scrub-buffered" style={{ width: `${bufferedPct}%` }} />
-          <div className="scrub-played" style={{ width: `${played}%` }} />
+      {startPosition === null ? (
+        <div className="player-loading" role="status" aria-label="Loading video">
+          <span className="spinner" />
         </div>
+      ) : (
+        <VideoPlayer title={title}>
+          <VideoSkin className="jelly-player-skin">
+            <Video
+              className="jelly-player-video"
+              src={api.streamUrl(itemId)}
+              preload="auto"
+              autoPlay
+              playsInline
+              onLoadedMetadata={(event) => {
+                const video = event.currentTarget;
+                video.currentTime = startPosition;
+                positionRef.current = startPosition;
+              }}
+              onTimeUpdate={(event) => {
+                positionRef.current = event.currentTarget.currentTime;
+              }}
+              onPlay={() => {
+                startedRef.current = true;
+                pausedRef.current = false;
+                if (playbackStartedRef.current) return;
+                playbackStartedRef.current = true;
+                void api
+                  .reportPlaybackStart(
+                    itemId,
+                    Math.round(positionRef.current * 10_000_000),
+                    `jf-${itemId.slice(0, 8)}`,
+                  )
+                  .catch(() => {});
+              }}
+              onPause={() => {
+                pausedRef.current = true;
+              }}
+              onError={() => setError("This item could not be played.")}
+            />
+          </VideoSkin>
+        </VideoPlayer>
+      )}
 
-        <span className="time">{formatTime(duration)}</span>
-
-        <button type="button" className="link" onClick={() => skip(-30)} title="Back 30 seconds">
-          ↺30
-        </button>
-        <button type="button" className="link" onClick={() => skip(30)} title="Forward 30 seconds">
-          30↻
-        </button>
-
-        <input
-          className="volume"
-          type="range"
-          min={0}
-          max={1}
-          step={0.05}
-          value={muted ? 0 : volume}
-          aria-label="Volume"
-          onChange={(e) => {
-            const next = Number(e.target.value);
-            setVolume(next);
-            setMuted(next === 0);
-            if (videoRef.current) {
-              videoRef.current.volume = next;
-              videoRef.current.muted = false;
-            }
-          }}
-        />
-
-        <button type="button" className="link" onClick={onClose}>
-          Close
-        </button>
-      </div>
-
-      <p className="player-title">{title}</p>
+      {error && <p className="player-error">{error}</p>}
     </div>
   );
 }

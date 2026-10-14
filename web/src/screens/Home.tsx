@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "../App";
 import { api } from "../api/client";
 import { PosterGrid } from "../components/ItemCard";
-import { libraryIcon, libraryLabel, useLibraries } from "../library";
+import { libraryLabel, useLibraries } from "../library";
 import type { BaseItem } from "../types";
 import type { Route } from "../router";
 
@@ -28,6 +28,8 @@ export function Home({
   const userId = session?.user.Id ?? "";
   const { folders, scanning, statuses, error } = useLibraries();
 
+  const [views, setViews] = useState<BaseItem[]>([]);
+  const [viewsError, setViewsError] = useState("");
   const [resume, setResume] = useState<BaseItem[]>([]);
   const [nextUp, setNextUp] = useState<BaseItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,9 +40,19 @@ export function Home({
 
     (async () => {
       // Independent requests so one slow endpoint does not blank the page.
-      const [r, n] = await Promise.allSettled([api.resume(userId, 12), api.nextUp(userId, 12)]);
+      const [v, r, n] = await Promise.allSettled([
+        api.views(userId),
+        api.resume(userId, 12),
+        api.nextUp(userId, 12),
+      ]);
       if (cancelled) return;
 
+      if (v.status === "fulfilled") {
+        setViews(v.value);
+        setViewsError("");
+      } else {
+        setViewsError(v.reason instanceof Error ? v.reason.message : String(v.reason));
+      }
       if (r.status === "fulfilled") setResume(r.value.Items);
       if (n.status === "fulfilled") setNextUp(n.value.Items);
     })().finally(() => {
@@ -71,14 +83,14 @@ export function Home({
 
   return (
     <main>
-      {error && <p className="error">{error}</p>}
+      {(error || viewsError) && <p className="error">{error || viewsError}</p>}
 
       {scanning ? (
         <ScanPanel folders={folders} statuses={statuses} />
       ) : (
         <section>
           <h2>My Libraries</h2>
-          {folders.length === 0 ? (
+          {views.length === 0 ? (
             <div className="empty">
               <p>No libraries yet.</p>
               <p className="muted">
@@ -91,20 +103,34 @@ export function Home({
             </div>
           ) : (
             <div className="grid views">
-              {folders.map((folder) => (
-                <button
-                  key={folder.ItemId}
-                  type="button"
-                  className="card view"
-                  onClick={() => go({ name: "library", viewId: folder.ItemId })}
-                >
-                  <span className="view-icon" aria-hidden="true">
-                    {libraryIcon(folder.CollectionType)}
-                  </span>
-                  <span className="view-name">{folder.Name}</span>
-                  <span className="muted small">{libraryLabel(folder.CollectionType)}</span>
-                </button>
-              ))}
+              {views.map((view) => {
+                const folder = folders.find(
+                  (candidate) => candidate.Name.toLowerCase() === view.Name.toLowerCase(),
+                );
+                const status = folder ? statuses[folder.ItemId] : undefined;
+                return (
+                  <button
+                    key={view.Id}
+                    type="button"
+                    className="card view"
+                    onClick={() => go({ name: "library", viewId: view.Id })}
+                  >
+                    <span className="view-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M4 5.75h6l2 2h8v10.5H4z" />
+                        <path d="M4.5 9.25h15" />
+                      </svg>
+                    </span>
+                    <span className="view-copy">
+                      <span className="view-name">{view.Name}</span>
+                      <span className="muted small">{libraryLabel(view.CollectionType ?? null)}</span>
+                      {status?.state === "Done" && status.detail?.startsWith("No supported media") && (
+                        <span className="muted small">{status.detail}</span>
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
         </section>
@@ -124,7 +150,7 @@ export function Home({
         </section>
       )}
 
-      {!loading && resume.length === 0 && nextUp.length === 0 && folders.length > 0 && (
+      {!loading && resume.length === 0 && nextUp.length === 0 && views.length > 0 && (
         <section>
           <h2>Recently Added</h2>
           <RecentItems userId={userId} open={openItem} play={playItem} />

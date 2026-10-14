@@ -30,6 +30,12 @@ export function TopBar() {
   return (
     <header className="topbar">
       <button type="button" className="brand" onClick={goHome}>
+        <span className="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 28 28">
+            <path d="M5 8.5 14 3l9 5.5v11L14 25l-9-5.5z" />
+            <path d="m11 9 7 5-7 5z" />
+          </svg>
+        </span>
         {session?.server.ServerName ?? "jellyfin-clone"}
       </button>
 
@@ -45,16 +51,6 @@ export function TopBar() {
       <span className="spacer" />
 
       {session?.user.Name && <span className="muted username">{session.user.Name}</span>}
-
-      {session?.user.Policy.IsAdministrator && (
-        <button
-          type="button"
-          className="link"
-          onClick={() => navigate({ name: "dashboard" })}
-        >
-          Dashboard
-        </button>
-      )}
 
       <button type="button" className="link" onClick={() => void logout()}>
         Sign out

@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@videojs/react": "^10.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

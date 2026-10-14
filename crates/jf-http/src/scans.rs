@@ -95,24 +95,32 @@ impl ScanManager {
             // Unbound: nothing to scan. Treat as a no-op rather than panicking.
             return Ok(());
         };
+        let libraries = app.scanner.libraries().await?;
+        if libraries.is_empty() {
+            app.emit("scanComplete", serde_json::json!({ "libraries": 0 }));
+            return Ok(());
+        }
+
         let status = Arc::clone(&self.status);
         let running = Arc::clone(&self.running);
 
+        // Publish queued state before returning, so a client polling
+        // immediately after requesting a scan cannot miss the start.
+        for library in &libraries {
+            set_status(
+                &status,
+                &library.id,
+                ScanStatus {
+                    state: "Queued".into(),
+                    progress: None,
+                    processed: 0,
+                    detail: None,
+                },
+            );
+        }
+
         tokio::spawn(async move {
             let _guard = running.lock().await;
-
-            let libraries = match app.scanner.libraries().await {
-                Ok(libs) => libs,
-                Err(e) => {
-                    tracing::error!(error = %e, "could not list libraries for scan");
-                    return;
-                }
-            };
-
-            if libraries.is_empty() {
-                app.emit("scanComplete", serde_json::json!({ "libraries": 0 }));
-                return;
-            }
 
             for library in &libraries {
                 set_status(
@@ -247,7 +255,7 @@ fn describe(report: &ScanReport) -> String {
         parts.push(format!("{} errors", report.errors));
     }
     if parts.is_empty() {
-        "no changes".to_owned()
+        "No supported media files found. Check the folder and its file formats.".to_owned()
     } else {
         parts.join(", ")
     }
@@ -277,7 +285,10 @@ mod tests {
         assert_eq!(describe(&report), "3 added, 2 updated, 1 removed");
 
         let empty = ScanReport { library_id: "l".into(), ..Default::default() };
-        assert_eq!(describe(&empty), "no changes");
+        assert_eq!(
+            describe(&empty),
+            "No supported media files found. Check the folder and its file formats."
+        );
 
         let with_errors = ScanReport { errors: 4, ..Default::default() };
         assert_eq!(describe(&with_errors), "4 errors");

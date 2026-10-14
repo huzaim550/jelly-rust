@@ -9,6 +9,12 @@ use std::sync::Arc;
 
 use crate::scans::ScanManager;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServerAction {
+    Shutdown,
+    Restart,
+}
+
 /// Directory layout for a server's mutable data.
 #[derive(Debug, Clone)]
 pub struct DataPaths {
@@ -77,6 +83,8 @@ pub struct AppState {
     pub started_at: std::time::Instant,
     /// Broadcast channel for server-sent events.
     pub events: tokio::sync::broadcast::Sender<String>,
+    /// Server lifecycle requests from administrator endpoints.
+    pub server_control: tokio::sync::watch::Sender<Option<ServerAction>>,
 }
 
 impl AppState {
@@ -103,6 +111,7 @@ impl AppState {
         );
 
         let (events, _) = tokio::sync::broadcast::channel(256);
+        let (server_control, _) = tokio::sync::watch::channel(None);
 
         let mut state = Self {
             db,
@@ -119,6 +128,7 @@ impl AppState {
             version: version.to_owned(),
             started_at: std::time::Instant::now(),
             events,
+            server_control,
         };
 
         // The scan manager needs the finished `Arc<AppState>` to reach the

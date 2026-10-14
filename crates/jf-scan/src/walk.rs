@@ -45,15 +45,32 @@ pub struct ChangeKind {
 
 /// Collect every media file under `root`, skipping hidden and system dirs.
 pub fn collect_media_files(root: &Path) -> Vec<PathBuf> {
-    WalkDir::new(root)
+    collect_media_files_with_errors(root).0
+}
+
+/// Collect media files and count entries that could not be inspected.
+///
+/// The scanner uses the error count to avoid deleting indexed items when a
+/// permission or I/O error made the walk incomplete.
+pub fn collect_media_files_with_errors(root: &Path) -> (Vec<PathBuf>, usize) {
+    let mut errors = 0;
+    let files = WalkDir::new(root)
         .follow_links(false)
         .into_iter()
         .filter_entry(|e| !should_skip(e.path(), root))
-        .filter_map(Result::ok)
+        .filter_map(|entry| match entry {
+            Ok(entry) => Some(entry),
+            Err(error) => {
+                tracing::warn!(error = %error, "could not read library entry");
+                errors += 1;
+                None
+            }
+        })
         .filter(|e| e.file_type().is_file())
         .map(|e| e.into_path())
         .filter(|p| is_media_file(p))
-        .collect()
+        .collect();
+    (files, errors)
 }
 
 /// Collect image sidecars (posters, fanart) under `root`.

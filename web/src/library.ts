@@ -82,9 +82,9 @@ export function useLibraries() {
   const add = useCallback(
     async (name: string, collectionType: LibraryType, path: string) => {
       await api.addVirtualFolder(name, collectionType, path);
-      await refresh();
+      await Promise.all([refresh(), pollStatus()]);
     },
-    [refresh],
+    [pollStatus, refresh],
   );
 
   const remove = useCallback(

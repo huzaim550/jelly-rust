@@ -13,7 +13,7 @@ use jf_db::users::NewUser;
 use jf_core::dto::UserPolicy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::auth::RequireAuth;
@@ -354,7 +354,7 @@ pub async fn add_virtual_folder(
         .and_then(|p| p.split(',').map(str::trim).find(|s| !s.is_empty()))
         .ok_or_else(|| ApiError::bad_request("A library path is required."))?;
 
-    let root = PathBuf::from(path);
+    let root = expand_home(path);
     if !root.is_dir() {
         return Err(ApiError::bad_request(format!(
             "`{}` is not a directory on the server.",
@@ -459,6 +459,51 @@ pub struct PhysicalPathDto {
     pub path: String,
 }
 
+/// Expand a leading `~` to the invoking user's home directory.
+///
+/// People type `~/Movies` out of habit; without this the path is taken
+/// literally, fails `is_dir`, and the error blames a directory that looks
+/// perfectly reasonable on screen.
+pub fn expand_home(raw: &str) -> PathBuf {
+    let trimmed = raw.trim();
+
+    let Some(rest) = trimmed.strip_prefix('~') else {
+        return PathBuf::from(trimmed);
+    };
+
+    let rest = rest.trim_start();
+    let path = if rest.is_empty() {
+        ""
+    } else if let Some(path) = rest.strip_prefix('/') {
+        path
+    } else {
+        return PathBuf::from(trimmed);
+    };
+
+    if path.is_empty() {
+        if let Some(home) = home_dir() {
+            return home;
+        }
+        return PathBuf::from(trimmed);
+    }
+
+    if let Some(home) = home_dir() {
+        return home.join(path);
+    }
+
+    PathBuf::from(trimmed)
+}
+
+/// The current user's home directory, from `$HOME` or the password database.
+fn home_dir() -> Option<PathBuf> {
+    if let Some(home) = std::env::var_os("HOME") {
+        if !home.is_empty() {
+            return Some(PathBuf::from(home));
+        }
+    }
+    None
+}
+
 /// `GET /Library/PhysicalPaths`
 ///
 /// A server-side folder picker. The browser cannot list the server's
@@ -475,7 +520,7 @@ pub async fn get_physical_paths(
     }
 
     let raw = params.get("path").map(String::as_str).unwrap_or("/");
-    let root = Path::new(raw);
+    let root = expand_home(raw);
 
     // Refuse anything that is not a directory rather than erroring later.
     if !root.is_dir() {
@@ -508,6 +553,29 @@ pub async fn get_physical_paths(
     entries.extend(children);
 
     Ok(Json(entries))
+}
+
+#[cfg(test)]
+mod expand_home_tests {
+    use super::expand_home;
+
+    #[test]
+    fn a_leading_tilde_expands_to_the_home_directory() {
+        let home = std::env::var("HOME").expect("HOME");
+
+        assert_eq!(expand_home("~/Movies"), std::path::PathBuf::from(&home).join("Movies"));
+        assert_eq!(expand_home(" ~ /Movies "), std::path::PathBuf::from(&home).join("Movies"));
+        assert_eq!(expand_home("~"), std::path::PathBuf::from(&home));
+    }
+
+    #[test]
+    fn other_paths_are_left_alone() {
+        assert_eq!(expand_home("/mnt/media"), std::path::PathBuf::from("/mnt/media"));
+        // A tilde that is not a home reference must stay literal, not become
+        // `~/foo`.
+        assert_eq!(expand_home("/data/~backup"), std::path::PathBuf::from("/data/~backup"));
+        assert_eq!(expand_home("relative/dir"), std::path::PathBuf::from("relative/dir"));
+    }
 }
 
 #[cfg(test)]
@@ -589,8 +657,9 @@ pub async fn get_scan_status(
         ));
     }
 
-    Ok(Json(serde_json::json!({
-        "scanning": app.scans.is_running().await,
-        "libraries": app.scans.statuses().await,
-    })))
+    let libraries = app.scans.statuses().await;
+    let scanning = app.scans.is_running().await
+        || libraries.values().any(|status| matches!(status.state.as_str(), "Queued" | "Scanning"));
+
+    Ok(Json(serde_json::json!({ "scanning": scanning, "libraries": libraries })))
 }

@@ -6,8 +6,8 @@
  * on first run.
  */
 
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { App } from "../src/App";
@@ -54,7 +54,9 @@ describe("App boot", () => {
     await waitFor(() => expect(screen.getByText("My Libraries")).toBeInTheDocument(), {
       timeout: 4000,
     });
-    expect(screen.getByRole("button", { name: /films/i })).toBeInTheDocument();
+    const tileGrid = document.querySelector(".grid.views");
+    expect(tileGrid).not.toBeNull();
+    expect(within(tileGrid!).getByRole("button", { name: /films/i })).toBeInTheDocument();
   });
 
   it("drops an invalid stored token and shows login", async () => {
@@ -148,7 +150,46 @@ describe("dashboard", () => {
     render(<App />);
 
     await waitFor(() => expect(screen.getByText("My Libraries")).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: /films/i })).toBeInTheDocument();
+    const tileGrid = document.querySelector(".grid.views");
+    expect(tileGrid).not.toBeNull();
+    expect(within(tileGrid!).getByRole("button", { name: /films/i })).toBeInTheDocument();
+  });
+
+  it("collapses the home sidebar behind a hamburger menu", async () => {
+    render(<App />);
+    const user = userEvent.setup();
+
+    const menu = await screen.findByRole("button", { name: /open navigation menu/i });
+    expect(screen.queryByRole("button", { name: "Browse" })).not.toBeInTheDocument();
+
+    await user.click(menu);
+    expect(screen.getByRole("button", { name: "Browse" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /close navigation menu/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /close navigation menu/i }));
+    expect(screen.queryByRole("button", { name: "Browse" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["Restart", "/System/Restart", "restart"],
+    ["Shutdown", "/System/Shutdown", "shut down"],
+  ] as const)("allows an administrator to %s the server", async (label, endpoint, verb) => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<App />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: /open navigation menu/i }));
+    await user.click(screen.getByRole("button", { name: /dashboard/i }));
+    await screen.findByRole("heading", { name: /^dashboard$/i });
+    await user.click(screen.getByRole("button", { name: label }));
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining(verb));
+    await waitFor(() => {
+      expect(server.calls.some((call) => call.method === "POST" && call.path === endpoint)).toBe(true);
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      label === "Restart" ? /restarting the server/i : /server is shutting down/i,
+    );
   });
 
   it("shows a progress panel instead of tiles while scanning", async () => {
@@ -167,8 +208,33 @@ describe("dashboard", () => {
     expect(screen.getByText("50%")).toBeInTheDocument();
   });
 
+  it("explains when a scan found no supported media files", async () => {
+    server.on("GET", "/Library/ScanStatus", {
+      scanning: false,
+      libraries: {
+        "lib-1": {
+          state: "Done",
+          progress: 1,
+          processed: 0,
+          detail: "No supported media files found. Check the folder and its file formats.",
+        },
+      },
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByText(/no supported media files found/i),
+    ).toBeInTheDocument();
+  });
+
   it("explains how to add a library when there are none", async () => {
     server.on("GET", "/Library/VirtualFolders", []);
+    server.on("GET", `/Users/${ADMIN_USER.Id}/Views`, {
+      Items: [],
+      TotalRecordCount: 0,
+      StartIndex: 0,
+    });
 
     render(<App />);
 

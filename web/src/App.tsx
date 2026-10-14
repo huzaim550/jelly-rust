@@ -1,7 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { flushSync } from "react-dom";
 import { api, ApiError } from "./api/client";
 import type { PublicSystemInfo, User } from "./types";
 import { useRoute, type Route } from "./router";
+import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { Login } from "./screens/Login";
 import { Home } from "./screens/Home";
@@ -111,6 +113,17 @@ export function App() {
     go({ name: "home" }, true);
   }, [go]);
 
+  const startPlayback = useCallback((item: { itemId: string; title: string }) => {
+    flushSync(() => setPlaying(item));
+    const stage = document.querySelector<HTMLElement>(".player-stage");
+    try {
+      const request = stage?.requestFullscreen?.();
+      if (request) void request.catch(() => {});
+    } catch {
+      // The stage already fills the viewport when fullscreen is unavailable.
+    }
+  }, []);
+
   const context = useMemo<AppContextValue>(
     () => ({ session, status, error, login, logout }),
     [session, status, error, login, logout],
@@ -158,7 +171,6 @@ export function App() {
 
   return (
     <AppContext.Provider value={context}>
-      <TopBar />
       {playing ? (
         <Player
           itemId={playing.itemId}
@@ -170,7 +182,17 @@ export function App() {
           }}
         />
       ) : (
-        <Screen route={route} go={go} onPlay={setPlaying} />
+        <div
+          className={`app-shell${route.name === "home" ? " app-shell-home" : ""}${
+            route.name === "dashboard" ? " app-shell-dashboard" : ""
+          }`}
+        >
+          {(route.name === "home" || route.name === "dashboard") && <Sidebar route={route} />}
+          <div className="app-workspace">
+            <TopBar />
+            <Screen route={route} go={go} onPlay={startPlayback} />
+          </div>
+        </div>
       )}
     </AppContext.Provider>
   );

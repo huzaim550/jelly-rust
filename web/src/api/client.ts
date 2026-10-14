@@ -19,6 +19,27 @@ const TOKEN_KEY = "jf.token";
 const DEVICE_KEY = "jf.device";
 
 /**
+ * One directory from `/Library/PhysicalPaths`.
+ *
+ * PascalCase because that is what the endpoint sends: this API mirrors
+ * Jellyfin's wire format, where every field is capitalised. Reading `name`
+ * here silently yields `undefined` and the picker renders "undefined/".
+ */
+export interface PhysicalPath {
+  Name: string;
+  Path: string;
+}
+
+export interface SessionSummary {
+  Id: string;
+  UserName: string;
+  Client: string;
+  DeviceName: string;
+  ApplicationVersion: string;
+  IsActive: boolean;
+}
+
+/**
  * `localStorage`, but never throwing.
  *
  * Firefox private browsing and Safari's restricted mode throw on *accessing*
@@ -360,8 +381,17 @@ export const api = {
     return request("GET", "/Library/ScanStatus");
   },
 
+  sessions(): Promise<SessionSummary[]> {
+    return request("GET", "/Sessions");
+  },
+
+  serverControl(action: "restart" | "shutdown"): Promise<void> {
+    const path = action === "restart" ? "/System/Restart" : "/System/Shutdown";
+    return request("POST", path);
+  },
+
   /** List a directory on the server, for the folder picker. */
-  physicalPaths(path = "/"): Promise<Array<{ name: string; path: string }>> {
+  physicalPaths(path = "/"): Promise<PhysicalPath[]> {
     return request("GET", "/Library/PhysicalPaths", { params: { path } });
   },
 

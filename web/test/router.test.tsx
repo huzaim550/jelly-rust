@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { App } from "../src/App";
@@ -72,6 +72,7 @@ describe("in-app navigation", () => {
     expect(window.location.pathname).toBe("/");
 
     // The regression this guards: the URL changed but the screen did not.
+    await user.click(screen.getByRole("button", { name: /open navigation menu/i }));
     await user.click(screen.getByRole("button", { name: /dashboard/i }));
 
     await waitFor(() =>
@@ -86,6 +87,7 @@ describe("in-app navigation", () => {
     const user = userEvent.setup();
 
     await screen.findByText("My Libraries");
+    await user.click(screen.getByRole("button", { name: /open navigation menu/i }));
     await user.click(screen.getByRole("button", { name: /dashboard/i }));
     await screen.findByRole("heading", { name: /^dashboard$/i });
 
@@ -97,16 +99,35 @@ describe("in-app navigation", () => {
 
   it("opens a library tile on that library's page", async () => {
     seedAdmin(server);
+    server.on("GET", "/Users/user-1/Items/root-1", {
+      Items: [
+        {
+          Id: "movie-1",
+          Name: "Example Movie",
+          Type: "Movie",
+          ServerId: "server-1",
+          IsFolder: false,
+        },
+      ],
+      TotalRecordCount: 1,
+      StartIndex: 0,
+    });
     render(<App />);
     const user = userEvent.setup();
 
     await screen.findByText("My Libraries");
-    await user.click(screen.getByRole("button", { name: /films/i }));
+    const tileGrid = document.querySelector(".grid.views");
+    expect(tileGrid).not.toBeNull();
+    await user.click(within(tileGrid!).getByRole("button", { name: /films/i }));
 
-    // The library screen must actually request that library's items.
-    await waitFor(() =>
-      expect(server.calls.some((c) => c.path.includes("/Items/lib-1"))).toBe(true),
-    );
+    expect(await screen.findByText("Example Movie")).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/library/root-1");
+    expect(screen.queryByRole("button", { name: /open navigation menu/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: /main navigation/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /libraries/i }));
+    await screen.findByRole("heading", { name: /my libraries/i });
+    expect(window.location.pathname).toBe("/");
   });
 
   it("follows a browser back button", async () => {
@@ -115,6 +136,7 @@ describe("in-app navigation", () => {
     const user = userEvent.setup();
 
     await screen.findByText("My Libraries");
+    await user.click(screen.getByRole("button", { name: /open navigation menu/i }));
     await user.click(screen.getByRole("button", { name: /dashboard/i }));
     await screen.findByRole("heading", { name: /^dashboard$/i });
 

@@ -176,6 +176,8 @@ pub fn router(app: Arc<AppState>) -> Router {
         // System
         .route("/System/Info/Public", get(routes::system_info_public))
         .route("/System/Info", get(routes::system_info))
+        .route("/System/Shutdown", post(routes::shutdown_server))
+        .route("/System/Restart", post(routes::restart_server))
         .route("/Plugins", get(routes::list_plugins))
         // Auth
         .route("/Users/AuthenticateByName", post(routes::authenticate))

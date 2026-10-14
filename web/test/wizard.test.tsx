@@ -181,20 +181,24 @@ describe("library admin", () => {
     render(<App />);
     const user = userEvent.setup();
     await screen.findByText("My Libraries");
+    await user.click(screen.getByRole("button", { name: /open navigation menu/i }));
     await user.click(screen.getByRole("button", { name: /dashboard/i }));
 
     expect(await screen.findByRole("heading", { name: /^dashboard$/i })).toBeInTheDocument();
 
     const pathInput = await screen.findByLabelText(/folder on this server/i);
-    await user.type(pathInput, "/media/movies");
+    await user.click(screen.getByText(/browse the server/i));
+    await user.click(await screen.findByRole("button", { name: "movies/" }));
+    expect(pathInput).toHaveValue("/media/movies");
 
     await user.click(screen.getByRole("button", { name: /add library/i }));
 
     await waitFor(() =>
       expect(sent(server, "POST", "/Library/VirtualFolders")).toHaveLength(1),
     );
-    const body = sent(server, "POST", "/Library/VirtualFolders")[0]!;
-    expect(body.path).toBe("/Library/VirtualFolders");
+    const request = sent(server, "POST", "/Library/VirtualFolders")[0]!;
+    expect(request.path).toBe("/Library/VirtualFolders");
+    expect(new URLSearchParams(request.query).get("paths")).toBe("/media/movies");
   });
 
   it("refuses to add a library with no folder chosen", async () => {
@@ -202,6 +206,7 @@ describe("library admin", () => {
     render(<App />);
     const user = userEvent.setup();
     await screen.findByText("My Libraries");
+    await user.click(screen.getByRole("button", { name: /open navigation menu/i }));
     await user.click(screen.getByRole("button", { name: /dashboard/i }));
 
     const add = await screen.findByRole("button", { name: /add library/i });
@@ -213,9 +218,11 @@ describe("library admin", () => {
 
   it("starts a rescan of every library", async () => {
     seedAdmin(server);
+    server.on("POST", "/Library/Refresh", undefined, 204);
     render(<App />);
     const user = userEvent.setup();
     await screen.findByText("My Libraries");
+    await user.click(screen.getByRole("button", { name: /open navigation menu/i }));
     await user.click(screen.getByRole("button", { name: /dashboard/i }));
 
     await user.click(await screen.findByRole("button", { name: /scan all/i }));

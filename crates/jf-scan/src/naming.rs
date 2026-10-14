@@ -391,9 +391,11 @@ fn strip_release_tags(title: &str) -> String {
         }
     }
 
-    // Remove trailing whitespace-separated release tokens. A token qualifies if
-    // it is a known quality/source marker, or a short token containing digits
-    // (which covers `1080p`, `x265`, `DTS-HD`, and `x264-GROUP`).
+    // Remove trailing whitespace-separated release tokens.
+    //
+    // Only tokens that actually look technical are removed. An earlier version
+    // also dropped any short token containing a digit, which ate real titles:
+    // "Blade Runner 2049" became "Blade Runner" and "Se7en" became "S".
     loop {
         let trimmed = t.trim_end();
         let Some(last) = trimmed.rsplit(' ').next() else { break };
@@ -404,8 +406,11 @@ fn strip_release_tags(title: &str) -> String {
         let normalized = last
             .trim_matches(|c: char| c == '.' || c == '-' || c == '_')
             .to_ascii_lowercase();
+        // "x264-GROUP" is a codec tag; its first segment is what identifies it.
+        let head = normalized.split(['-', '.']).next().unwrap_or("");
         let is_tag = QUALITY_TOKENS.contains(&normalized.as_str())
-            || (normalized.len() <= 12 && normalized.contains(|c: char| c.is_ascii_digit()));
+            || QUALITY_TOKENS.contains(&head)
+            || is_resolution(last);
 
         if is_tag {
             t = trimmed[..trimmed.len() - last.len()].trim_end().to_owned();
@@ -415,6 +420,19 @@ fn strip_release_tags(title: &str) -> String {
     }
 
     t
+}
+
+/// Whether a token is a resolution such as `1080p`, `720i` or `2160p`.
+///
+/// A trailing letter is required on purpose: a bare `2049` is a year, and
+/// belongs to the title.
+fn is_resolution(token: &str) -> bool {
+    let digits = token.len() - token.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+    if !(3..=4).contains(&digits) {
+        return false;
+    }
+    let suffix = &token[digits..];
+    !suffix.is_empty() && suffix.len() <= 2 && suffix.chars().all(|c| c.is_ascii_alphabetic())
 }
 
 /// Collapse separators and trim punctuation left behind by tag stripping.
@@ -542,6 +560,18 @@ mod tests {
         let p = parse("Show S01E02E03.mkv");
         assert_eq!(p.season, Some(1));
         assert_eq!(p.episode, Some(2));
+    }
+
+    #[test]
+    fn digits_that_belong_to_the_title_survive() {
+        // The trailing number is part of the name, not a release tag.
+        assert_eq!(parse("Blade Runner 2049 (2017).mkv").title, "Blade Runner 2049");
+        assert_eq!(parse("Film 01 (2001).mkv").title, "Film 01");
+        assert_eq!(parse("Se7en (1995).mkv").title, "Se7en");
+        assert_eq!(parse("Apollo 13 (1995).mkv").title, "Apollo 13");
+        // ...while technical tokens still go.
+        assert_eq!(parse("Se7en 1995 1080p.mkv").title, "Se7en");
+        assert_eq!(parse("Amour 2012 2160p HDR.mkv").title, "Amour");
     }
 
     #[test]

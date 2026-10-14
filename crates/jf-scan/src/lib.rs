@@ -25,7 +25,7 @@ use sqlx::Row;
 use jf_core::new_item_id;
 use std::path::Path;
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 /// Configuration for a single library.
 #[derive(Debug, Clone)]
@@ -148,22 +148,23 @@ impl Scanner {
 
         // Collect candidate media files off the async runtime; ffprobe is slow
         // and blocking, and libraries can hold tens of thousands of entries.
-        let entries = walk::collect_media_files(&lib.path);
+        let (entries, walk_errors) = walk::collect_media_files_with_errors(&lib.path);
+        report.errors += walk_errors;
 
         // Probe across all cores. `Prober::probe` is synchronous and blocking,
         // which is exactly what rayon worker threads are for, so this needs no
         // spawn_blocking hop. Ordering does not matter: results are keyed by
         // path and used to reconcile the tree afterwards.
         let prober = Arc::clone(&self.prober);
-        let probes: Vec<(std::path::PathBuf, Option<ProbeResult>)> = entries
+        let probes: Vec<(std::path::PathBuf, Result<ProbeResult, probe::ProbeError>)> = entries
             .par_iter()
-            .map(|path| (path.clone(), prober.probe_lossy(path)))
+            .map(|path| (path.clone(), prober.probe(path)))
             .collect();
 
         let parser = NameParser::new();
         let mut seen_paths: Vec<String> = Vec::with_capacity(entries.len());
 
-        for (i, (path, probe)) in probes.iter().enumerate() {
+        for (i, (path, result)) in probes.iter().enumerate() {
             let path_str = path.to_string_lossy().to_string();
             seen_paths.push(path_str.clone());
 
@@ -181,13 +182,19 @@ impl Scanner {
                 });
             }
 
-            if probe.is_none() {
-                // Not a container ffprobe understands; still track it so a
-                // transient ffprobe failure does not delete a known item.
-                debug!(path = %path_str, "no probe result");
-                report.skipped += 1;
-                continue;
-            }
+            let probe = match result {
+                Ok(probe) if probe.container.is_some() => probe.clone(),
+                Ok(_) => {
+                    report.errors += 1;
+                    warn!(path = %path_str, "ffprobe found no container; indexing from file metadata");
+                    fallback_probe(path)
+                }
+                Err(error) => {
+                    report.errors += 1;
+                    warn!(path = %path_str, error = %error, "ffprobe failed; indexing from file metadata");
+                    fallback_probe(path)
+                }
+            };
 
             let parsed = parser.parse(&path);
             let (parent_id, series_id) =
@@ -195,7 +202,7 @@ impl Scanner {
                     .await?;
 
             match self
-                .upsert_item(lib, &path, Some(&parsed), probe.as_ref(), &parent_id, series_id.as_deref())
+                .upsert_item(lib, path, Some(&parsed), Some(&probe), &parent_id, series_id.as_deref())
                 .await
             {
                 Ok(true) => report.added += 1,
@@ -207,7 +214,11 @@ impl Scanner {
             }
         }
 
-        report.removed = self.reconcile_removed(&root_id, &seen_paths).await?;
+        if walk_errors == 0 {
+            report.removed = self.reconcile_removed(&root_id, &seen_paths).await?;
+        } else {
+            warn!(library = %lib.name, walk_errors, "keeping previously indexed items because the library walk was incomplete");
+        }
         info!(library = %lib.name, ?report, "scan complete");
         Ok(report)
     }
@@ -644,6 +655,17 @@ impl Scanner {
     }
 }
 
+fn fallback_probe(path: &Path) -> ProbeResult {
+    ProbeResult {
+        path: path.to_string_lossy().into_owned(),
+        container: path.extension().and_then(|ext| ext.to_str()).map(str::to_ascii_lowercase),
+        duration_secs: None,
+        size: std::fs::metadata(path).ok().map(|metadata| metadata.len() as i64),
+        bitrate: None,
+        streams: Vec::new(),
+    }
+}
+
 /// Map a library's collection type plus filename hints onto an item kind.
 fn classify(collection_type: &str, parsed: Option<&ParsedName>) -> (&'static str, Option<&'static str>) {
     if collection_type.eq_ignore_ascii_case("movies") {
@@ -810,5 +832,34 @@ mod tests {
 
         assert_eq!(report.added, 0);
         assert!(seen.is_empty());
+    }
+
+    #[tokio::test]
+    async fn scan_indexes_media_even_when_ffprobe_cannot_read_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("A Movie (2024).mkv");
+        std::fs::write(&file, b"not a valid media container").expect("write fixture");
+
+        let db = Database::connect_memory().await.expect("memory db");
+        let scanner = Scanner::new(db.clone());
+        let mut cfg = LibraryConfig {
+            id: String::new(),
+            name: "Movies".into(),
+            path: dir.path().to_path_buf(),
+            collection_type: "movies".into(),
+        };
+        cfg.id = scanner.add_library(&cfg).await.expect("add library");
+
+        let report = scanner.scan_library(&cfg, None).await.expect("scan");
+
+        assert_eq!(report.added, 1);
+        assert_eq!(report.skipped, 0);
+        assert_eq!(report.errors, 1);
+        let name: String = sqlx::query_scalar("SELECT name FROM items WHERE path = ?")
+            .bind(file.to_string_lossy().to_string())
+            .fetch_one(db.pool())
+            .await
+            .expect("indexed item");
+        assert_eq!(name, "A Movie");
     }
 }

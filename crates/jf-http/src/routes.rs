@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::auth::{AuthUser, MaybeAuth, RequireAuth};
-use crate::state::AppState;
+use crate::state::{AppState, ServerAction};
 
 type Shared = Arc<AppState>;
 
@@ -51,6 +51,44 @@ pub async fn system_info(
         "UptimeSeconds": app.uptime_secs(),
         "TranscodingSessions": app.hls.active_count().await,
     }))
+}
+
+/// Request a graceful server shutdown or restart.
+async fn request_server_action(
+    app: Shared,
+    auth: RequireAuth,
+    action: ServerAction,
+) -> Result<StatusCode, ApiError> {
+    if !auth.0.is_admin() {
+        return Err(ApiError::forbidden(
+            "Server controls require administrator access.",
+        ));
+    }
+
+    let control = app.server_control.clone();
+    tokio::spawn(async move {
+        // Let Axum finish writing the accepted response before beginning drain.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        control.send_replace(Some(action));
+    });
+
+    Ok(StatusCode::ACCEPTED)
+}
+
+/// `POST /System/Shutdown`
+pub async fn shutdown_server(
+    State(app): State<Shared>,
+    auth: RequireAuth,
+) -> Result<StatusCode, ApiError> {
+    request_server_action(app, auth, ServerAction::Shutdown).await
+}
+
+/// `POST /System/Restart`
+pub async fn restart_server(
+    State(app): State<Shared>,
+    auth: RequireAuth,
+) -> Result<StatusCode, ApiError> {
+    request_server_action(app, auth, ServerAction::Restart).await
 }
 
 /// `GET /Users/Public` — accounts offered on the login screen.

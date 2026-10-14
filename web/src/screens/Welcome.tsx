@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api } from "../api/client";
+import { api, type PhysicalPath } from "../api/client";
 import { LIBRARY_TYPES, type LibraryType, type VirtualFolder } from "../library";
 import type { Route } from "../router";
 
@@ -406,7 +406,7 @@ export function LibraryPicker({
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
   const [browsePath, setBrowsePath] = useState("/");
-  const [entries, setEntries] = useState<Array<{ name: string; path: string }>>([]);
+  const [entries, setEntries] = useState<PhysicalPath[]>([]);
   const [browsing, setBrowsing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -493,18 +493,18 @@ export function LibraryPicker({
             {!browsing && entries.length === 0 && <p className="muted">No subfolders.</p>}
             {entries.map((entry) => (
               <button
-                key={entry.path}
+                key={entry.Path}
                 type="button"
                 className="link"
                 onClick={() => {
-                  if (entry.name === "..") void browse(entry.path);
+                  if (entry.Name === "..") void browse(entry.Path);
                   else {
-                    setPath(entry.path);
-                    void browse(entry.path);
+                    setPath(entry.Path);
+                    void browse(entry.Path);
                   }
                 }}
               >
-                {entry.name === ".." ? "↑ .." : `${entry.name}/`}
+                {entry.Name === ".." ? "↑ .." : `${entry.Name}/`}
               </button>
             ))}
           </div>

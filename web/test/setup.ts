@@ -65,7 +65,7 @@ export interface FakeServer {
   /** Register a JSON response for `METHOD /path`. */
   on(method: string, path: string, body: unknown, status?: number): void;
   /** Calls received, for assertions. */
-  calls: Array<{ method: string; path: string; body?: unknown }>;
+  calls: Array<{ method: string; path: string; query: string; body?: unknown }>;
   restore: () => void;
 }
 
@@ -90,7 +90,8 @@ export function mockServer(): FakeServer {
         parsed = undefined;
       }
     }
-    calls.push({ method, path, body: parsed });
+    const query = url.includes("?") ? url.slice(url.indexOf("?") + 1) : "";
+    calls.push({ method, path, query, body: parsed });
 
     // Insertion order does not matter: a route is keyed by method+path, so a
     // later registration for the same key replaces the earlier one. This lets
@@ -168,6 +169,9 @@ export function seedAdmin(server: FakeServer, extra: { users?: unknown[] } = {})
     },
   ]);
   server.on("GET", "/Library/ScanStatus", { scanning: false, libraries: {} });
+  server.on("GET", "/Sessions", []);
+  server.on("POST", "/System/Restart", undefined, 202);
+  server.on("POST", "/System/Shutdown", undefined, 202);
   server.on("GET", "/Users/Public", {
     ServerId: "server-1",
     ServerName: "Test Server",
@@ -176,7 +180,7 @@ export function seedAdmin(server: FakeServer, extra: { users?: unknown[] } = {})
   server.on("GET", `/Users/${ADMIN_USER.Id}/Views`, {
     Items: [
       {
-        Id: "lib-1",
+        Id: "root-1",
         Name: "Films",
         Type: "UserView",
         ServerId: "server-1",

@@ -11,7 +11,10 @@
 //!   jellyfin-clone --scan             scan all libraries once, then exit
 
 use anyhow::{Context, Result};
-use jf_http::{ServerConfig, state::AppState};
+use jf_http::{
+    state::{AppState, ServerAction},
+    ServerConfig,
+};
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
@@ -176,6 +179,7 @@ async fn main() -> Result<()> {
         .with_context(|| format!("binding {addr}"))?;
 
     let router = jf_http::router(Arc::clone(&app));
+    let control = app.server_control.subscribe();
 
     println!();
     println!("  jellyfin-clone {VERSION}");
@@ -212,9 +216,14 @@ async fn main() -> Result<()> {
         })
     };
 
+    let (action_tx, action_rx) = tokio::sync::oneshot::channel();
     let result = axum::serve(listener, router)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(async move {
+            let action = shutdown_signal(control).await;
+            let _ = action_tx.send(action);
+        })
         .await;
+    let action = action_rx.await.unwrap_or(ServerAction::Shutdown);
 
     reaper.abort();
     result.context("server error")?;
@@ -222,12 +231,26 @@ async fn main() -> Result<()> {
     // Give plugins a chance to release resources.
     app.plugins.shutdown().await;
 
+    if action == ServerAction::Restart {
+        let executable = std::env::current_exe().context("finding server executable")?;
+        let args = std::env::args_os().skip(1).collect::<Vec<_>>();
+        drop(app);
+        std::process::Command::new(executable)
+            .args(args)
+            .spawn()
+            .context("starting replacement server process")?;
+        tracing::info!("replacement server process started");
+        return Ok(());
+    }
+
     println!("\nstopped");
     Ok(())
 }
 
-/// Resolve on Ctrl-C or SIGTERM.
-async fn shutdown_signal() {
+/// Resolve on Ctrl-C, SIGTERM, or an authenticated administrator request.
+async fn shutdown_signal(
+    mut control: tokio::sync::watch::Receiver<Option<ServerAction>>,
+) -> ServerAction {
     let ctrl_c = async {
         let _ = tokio::signal::ctrl_c().await;
     };
@@ -243,10 +266,18 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
 
-    tokio::select! {
-        _ = ctrl_c => {}
-        _ = terminate => {}
-    }
+    let action = tokio::select! {
+        _ = ctrl_c => ServerAction::Shutdown,
+        _ = terminate => ServerAction::Shutdown,
+        changed = control.changed() => {
+            if changed.is_ok() {
+                control.borrow().unwrap_or(ServerAction::Shutdown)
+            } else {
+                ServerAction::Shutdown
+            }
+        }
+    };
 
     tracing::info!("shutdown signal received");
+    action
 }

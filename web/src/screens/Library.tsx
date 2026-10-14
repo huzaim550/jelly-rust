@@ -28,6 +28,7 @@ export function Library({
   const [title, setTitle] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     if (!userId) return;
@@ -53,16 +54,19 @@ export function Library({
 
         if (!viewId) return;
 
-        const view = await api.item(userId, viewId);
+        const [views, result] = await Promise.all([
+          api.views(userId),
+          api.items(userId, {
+            parentId: viewId,
+            recursive: true,
+            limit: 500,
+            sortBy: "SortName",
+            fields: "Overview,ProductionYear,RunTimeTicks,UserData",
+          }),
+        ]);
+        const view = views.find((candidate) => candidate.Id === viewId);
+        if (!view) throw new Error("Library not found.");
         if (!cancelled) setTitle(view.Name);
-
-        const result = await api.items(userId, {
-          parentId: viewId,
-          recursive: true,
-          limit: 500,
-          sortBy: "SortName",
-          fields: "Overview,ProductionYear,RunTimeTicks,UserData",
-        });
         if (!cancelled) setItems(result.Items);
       } catch (err) {
         if (cancelled) return;
@@ -75,7 +79,39 @@ export function Library({
     return () => {
       cancelled = true;
     };
-  }, [userId, viewId, search]);
+  }, [userId, viewId, search, reload]);
+
+  useEffect(() => {
+    if (!session?.user.Policy.IsAdministrator) return;
+    let disposed = false;
+    let checking = false;
+    let scanObserved = false;
+
+    const checkScan = async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        const status = await api.scanStatus();
+        if (status.scanning) {
+          scanObserved = true;
+        } else if (scanObserved && !disposed) {
+          scanObserved = false;
+          setReload((value) => value + 1);
+        }
+      } catch {
+        // Scan status is admin-only and may be temporarily unavailable.
+      } finally {
+        checking = false;
+      }
+    };
+
+    void checkScan();
+    const timer = window.setInterval(() => void checkScan(), 1500);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [session?.user.Policy.IsAdministrator]);
 
   const openItem = (item: BaseItem) => go({ name: "item", itemId: item.Id });
   const playItem = (item: BaseItem) => onPlay({ itemId: item.Id, title: item.Name });
@@ -83,6 +119,16 @@ export function Library({
   return (
     <main>
       <div className="section-head">
+        {viewId && (
+          <button
+            type="button"
+            className="link library-back"
+            onClick={() => go({ name: "home" })}
+          >
+            <span aria-hidden="true">←</span>
+            <span>Libraries</span>
+          </button>
+        )}
         <h1>{title ?? (search ? "Search" : "Library")}</h1>
         {!loading && items.length > 0 && (
           <span className="muted small">{items.length} items</span>

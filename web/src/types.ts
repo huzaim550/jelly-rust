@@ -74,7 +74,9 @@ export interface BaseItem {
   ParentBackdropItemId?: string | null;
   Status?: string | null;
   PremiereDate?: string | null;
-  People?: Array<{ Id: string; Name: string; Type: string }>;
+  // `Name` is absent on some people entries the server emits, so consumers
+  // must guard rather than assume it is there.
+  People?: Array<{ Id: string; Name?: string | null; Type?: string | null }>;
   UserData?: UserData;
 }
 

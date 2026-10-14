@@ -358,7 +358,11 @@ async fn persist_metadata(
             serde_json::json!({
                 "id": format!("{item_id}-person-{index}"),
                 "name": person.name,
-                "type": person.role,
+                "type": if person.role.is_empty() {
+                    format!("{:?}", person.kind)
+                } else {
+                    person.role.clone()
+                },
                 "primaryImageTag": null,
             })
         })

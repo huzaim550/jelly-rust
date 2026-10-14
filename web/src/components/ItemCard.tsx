@@ -2,6 +2,19 @@ import { useRef } from "react";
 import { api } from "../api/client";
 import type { BaseItem } from "../types";
 
+/**
+ * Up to two initials for an avatar.
+ *
+ * People entries from the server are not guaranteed to carry a name, so this
+ * never assumes one exists: a crash in the cast strip took the whole home
+ * screen down with it.
+ */
+export function initials(name?: string | null): string {
+  const parts = (name ?? "").split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return parts.map((part) => part[0]).slice(0, 2).join("").toUpperCase();
+}
+
 /** Runtime ticks (100ns units) to `1h 23m` or `23m`. */
 export function formatDuration(ticks?: number | null): string {
   if (!ticks || ticks <= 0) return "";
@@ -105,7 +118,9 @@ export function ItemCard({
     <div className="card item">
       <button type="button" className="poster-button" onClick={onOpen}>
         {hasPoster(item) ? (
-          <img src={posterUrl(item)} alt="" loading="lazy" />
+          <div className="poster">
+            <img src={posterUrl(item)} alt="" loading="lazy" />
+          </div>
         ) : (
           <div className="poster placeholder">{item.Type}</div>
         )}
@@ -177,12 +192,15 @@ export function PosterRail({
   kicker,
   onOpen,
   onPlay,
+  ranked = false,
 }: {
   items: BaseItem[];
   title: string;
   kicker?: string;
   onOpen: (item: BaseItem) => void;
   onPlay: (item: BaseItem) => void;
+  /** Prefix each poster with its position, for "Top 10" rows. */
+  ranked?: boolean;
 }) {
   const railRef = useRef<HTMLDivElement>(null);
 
@@ -193,7 +211,7 @@ export function PosterRail({
   }
 
   return (
-    <section className="catalog-row">
+    <section className={`catalog-row${ranked ? " topten-row" : ""}`}>
       <div className="catalog-heading">
         <div>
           {kicker && <span className="catalog-kicker">{kicker}</span>}
@@ -219,14 +237,28 @@ export function PosterRail({
         </div>
       </div>
       <div ref={railRef} className="grid posters poster-row" role="region" aria-label={title}>
-        {items.map((item) => (
-          <ItemCard
-            key={item.Id}
-            item={item}
-            onOpen={() => onOpen(item)}
-            onPlay={() => onPlay(item)}
-          />
-        ))}
+        {items.map((item, index) =>
+          ranked ? (
+            <div className="topten-item" key={item.Id}>
+              {/* Decorative: the position is already implied by reading order. */}
+              <span className="topten-rank" aria-hidden="true">
+                {index + 1}
+              </span>
+              <ItemCard
+                item={item}
+                onOpen={() => onOpen(item)}
+                onPlay={() => onPlay(item)}
+              />
+            </div>
+          ) : (
+            <ItemCard
+              key={item.Id}
+              item={item}
+              onOpen={() => onOpen(item)}
+              onPlay={() => onPlay(item)}
+            />
+          ),
+        )}
       </div>
     </section>
   );

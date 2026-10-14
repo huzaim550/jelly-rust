@@ -1,18 +1,18 @@
 import { useEffect, useState } from "react";
 import { useSession } from "../App";
 import { api } from "../api/client";
-import { itemSubtitle, PosterRail } from "../components/ItemCard";
+import { itemSubtitle, initials, PosterRail } from "../components/ItemCard";
 import { libraryLabel, useLibraries } from "../library";
 import type { BaseItem } from "../types";
 import type { Route } from "../router";
 
 /**
- * Landing screen: library tiles, then continue watching and next up.
+ * Landing screen: one continuous page — a hero banner, then rows of posters.
  *
- * Library tiles come from `/Library/VirtualFolders` rather than the user's
- * views, because that is the same source the admin screen edits. Showing the
- * views endpoint here meant a freshly-added library did not appear until the
- * user list caught up.
+ * This is a single scroll surface on purpose. It was briefly split into a
+ * scrolling browser column beside a sticky hero panel, but two independently
+ * scrolling halves meant the hero was always pinned while the rows moved under
+ * it, which read as two apps rather than one.
  *
  * While a scan runs the tiles are replaced by progress, so an empty dashboard
  * after adding a library reads as "working" rather than "broken".
@@ -35,6 +35,7 @@ export function Home({
   const [recent, setRecent] = useState<BaseItem[]>([]);
   const [catalogError, setCatalogError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [slideIndexRaw, setSlideIndexRaw] = useState(0);
 
   useEffect(() => {
     if (!userId) return;
@@ -90,14 +91,42 @@ export function Home({
 
   const openItem = (item: BaseItem) => go({ name: "item", itemId: item.Id });
   const playItem = (item: BaseItem) => onPlay({ itemId: item.Id, title: item.Name });
-  const featured = resume[0] ?? recent[0] ?? nextUp[0] ?? null;
+
+  // The banner rotates through the titles that actually have artwork; anything
+  // without an image would render as an empty black panel.
+  const slides = [...recent, ...resume, ...nextUp]
+    .filter(
+      (item) =>
+        item.ImageUrls?.Backdrop ||
+        item.ImageUrls?.Primary ||
+        item.ParentBackdropItemId ||
+        item.BackdropImageTags?.length,
+    )
+    .filter((item, index, all) => all.findIndex((other) => other.Id === item.Id) === index)
+    .slice(0, 6);
+
+  // Keep the index in range if a refresh returns fewer featured titles.
+  const slideIndex = Math.min(slideIndexRaw, Math.max(0, slides.length - 1));
+  const featured = slides[slideIndex] ?? resume[0] ?? nextUp[0] ?? recent[0] ?? null;
   const featuredImageId = featured?.ParentBackdropItemId || featured?.Id;
   const featuredImageKind =
     featured && (featured.ParentBackdropItemId || featured.BackdropImageTags?.length)
       ? "Backdrop"
       : "Primary";
-  const featuredImageUrl = featured?.ImageUrls?.Backdrop || featured?.ImageUrls?.Primary;
-  const recentItems = recent;
+  const featuredImageUrl =
+    featured?.ImageUrls?.Backdrop ||
+    featured?.ImageUrls?.Primary ||
+    (featuredImageId ? api.imageUrl(featuredImageId, featuredImageKind, 1600) : undefined);
+  // Nameless people entries do occur on the wire, and rendering one as an empty
+  // circle (or crashing on `.split`) is worse than leaving it out.
+  const cast = (featured?.People ?? []).filter(
+    (person) => Boolean(person.Name) && (!person.Type || person.Type.toLowerCase() === "actor"),
+  );
+
+  function stepSlide(direction: -1 | 1) {
+    if (slides.length === 0) return;
+    setSlideIndexRaw((slideIndex + direction + slides.length) % slides.length);
+  }
 
   if (loading && folders.length === 0) {
     return <p className="muted loading">Loading…</p>;
@@ -112,123 +141,208 @@ export function Home({
       {scanning ? (
         <ScanPanel folders={folders} statuses={statuses} />
       ) : (
-        <>
+        <div className="home-layout">
           {featured && (
-            <section className="featured">
-              {featuredImageId && (
-                <img
-                  className="featured-image"
-                  src={featuredImageUrl || api.imageUrl(featuredImageId, featuredImageKind, 1600)}
-                  alt=""
-                  fetchPriority="high"
-                  onError={(event) => {
-                    event.currentTarget.style.visibility = "hidden";
-                  }}
-                />
-              )}
-              <div className="featured-copy">
-                <span className="featured-eyebrow">Featured for you</span>
+            <section className="hero-banner" aria-label={`Featured: ${featured.Name}`}>
+              <div className="hero-banner-art">
+                {featuredImageUrl && (
+                  <img
+                    src={featuredImageUrl}
+                    alt=""
+                    fetchPriority="high"
+                    onError={(event) => {
+                      event.currentTarget.style.visibility = "hidden";
+                    }}
+                  />
+                )}
+                <span className="hero-banner-tag">Featured for you</span>
+
+                {slides.length > 1 && (
+                  <>
+                    <button
+                      type="button"
+                      className="hero-slide-arrow prev"
+                      aria-label="Previous featured title"
+                      onClick={() => stepSlide(-1)}
+                    >
+                      ‹
+                    </button>
+                    <button
+                      type="button"
+                      className="hero-slide-arrow next"
+                      aria-label="Next featured title"
+                      onClick={() => stepSlide(1)}
+                    >
+                      ›
+                    </button>
+                    <div className="hero-slide-dots">
+                      {slides.map((slide, index) => (
+                        <button
+                          key={slide.Id}
+                          type="button"
+                          className="hero-slide-dot"
+                          aria-label={`Feature ${slide.Name}`}
+                          aria-current={index === slideIndex}
+                          onClick={() => setSlideIndexRaw(index)}
+                        />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="hero-banner-copy">
                 <h1>{featured.Name}</h1>
-                <div className="featured-meta">
-                  {featured.Type === "Episode" && featured.SeriesName && (
-                    <span>{featured.SeriesName}</span>
-                  )}
+                {featured.Type === "Episode" && featured.SeriesName && (
+                  <p className="hero-banner-series">{featured.SeriesName}</p>
+                )}
+                <div className="hero-banner-meta">
                   {itemSubtitle(featured) && <span>{itemSubtitle(featured)}</span>}
+                  {featured.CommunityRating != null && featured.CommunityRating > 0 && (
+                    <span className="hero-banner-rating">★ {featured.CommunityRating.toFixed(1)}</span>
+                  )}
+                  {featured.OfficialRating && (
+                    <span className="hero-banner-cert">{featured.OfficialRating}</span>
+                  )}
                 </div>
-                {featured.Overview && <p>{featured.Overview}</p>}
-                <div className="featured-actions">
-                  <button type="button" className="primary" onClick={() => playItem(featured)}>
-                    <span aria-hidden="true">▶</span> Play
+
+                {featured.Overview && (
+                  <p className="hero-banner-overview">{featured.Overview}</p>
+                )}
+
+                <div className="hero-banner-actions">
+                  <button
+                    type="button"
+                    className="home-watch-button"
+                    onClick={() => playItem(featured)}
+                  >
+                    <span aria-hidden="true">▶</span> Watch Now
                   </button>
-                  <button type="button" className="featured-secondary" onClick={() => openItem(featured)}>
+                  <button
+                    type="button"
+                    className="home-info-button"
+                    onClick={() => openItem(featured)}
+                  >
                     More info
                   </button>
                 </div>
+
+                {cast.length > 0 && (
+                  <div className="hero-banner-cast">
+                    <h2>Cast</h2>
+                    <div className="home-cast-list">
+                      {cast.slice(0, 7).map((person) => (
+                        <div className="home-cast-member" key={person.Id}>
+                          <span className="home-cast-avatar" aria-hidden="true">
+                            {initials(person.Name)}
+                          </span>
+                          <span className="name">{person.Name}</span>
+                        </div>
+                      ))}
+                      {cast.length > 7 && (
+                        <button
+                          type="button"
+                          className="home-cast-more"
+                          onClick={() => openItem(featured)}
+                        >
+                          View all
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </section>
           )}
 
-          {views.length > 0 ? (
-            <section className="home-libraries">
-              <div className="catalog-heading">
-                <div>
-                  <span className="catalog-kicker">Your collection</span>
-                  <h2>My Libraries</h2>
+          <div className="home-rows" aria-label="Browse your library">
+            {resume.length > 0 && (
+              <PosterRail
+                title="Continue Watching"
+                kicker="Pick up where you left off"
+                items={resume}
+                onOpen={openItem}
+                onPlay={playItem}
+              />
+            )}
+            {nextUp.length > 0 && (
+              <PosterRail
+                title="Next Up"
+                kicker="Keep your series going"
+                items={nextUp}
+                onOpen={openItem}
+                onPlay={playItem}
+              />
+            )}
+            {recent.length > 0 && (
+              <PosterRail
+                title="Recently Added"
+                kicker="Fresh from your collection"
+                items={recent}
+                onOpen={openItem}
+                onPlay={playItem}
+              />
+            )}
+
+            {views.length > 0 ? (
+              <section className="home-libraries">
+                <div className="catalog-heading">
+                  <div>
+                    <span className="catalog-kicker">Your collection</span>
+                    <h2>My Libraries</h2>
+                  </div>
                 </div>
-              </div>
-              <div className="grid views">
-                {views.map((view) => {
-                  const folder = folders.find(
-                    (candidate) => candidate.Name.toLowerCase() === view.Name.toLowerCase(),
-                  );
-                  const status = folder ? statuses[folder.ItemId] : undefined;
-                  return (
-                    <button
-                      key={view.Id}
-                      type="button"
-                      className="card view"
-                      onClick={() => go({ name: "library", viewId: view.Id })}
-                    >
-                      <span className="view-icon" aria-hidden="true">
-                        <svg viewBox="0 0 24 24">
-                          <path d="M4 5.75h6l2 2h8v10.5H4z" />
-                          <path d="M4.5 9.25h15" />
-                        </svg>
-                      </span>
-                      <span className="view-copy">
-                        <span className="view-name">{view.Name}</span>
-                        <span className="muted small">{libraryLabel(view.CollectionType ?? null)}</span>
-                        {status?.state === "Done" && status.detail?.startsWith("No supported media") && (
-                          <span className="muted small">{status.detail}</span>
-                        )}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-          ) : (
-            <section className="home-empty">
-              <h2>Start building your library</h2>
-              <p className="muted">
-                No libraries yet. Add a media folder to see your movies and shows here.
-              </p>
-              <button type="button" className="primary" onClick={() => go({ name: "dashboard" })}>
-                Open library settings
-              </button>
-            </section>
-          )}
-        </>
-      )}
-
-      {resume.length > 0 && (
-        <PosterRail
-          title="Continue Watching"
-          kicker="Pick up where you left off"
-          items={resume}
-          onOpen={openItem}
-          onPlay={playItem}
-        />
-      )}
-
-      {nextUp.length > 0 && (
-        <PosterRail
-          title="Next Up"
-          kicker="Keep your series going"
-          items={nextUp}
-          onOpen={openItem}
-          onPlay={playItem}
-        />
-      )}
-
-      {recentItems.length > 0 && (
-        <PosterRail
-          title="Recently Added"
-          kicker="Fresh from your collection"
-          items={recentItems}
-          onOpen={openItem}
-          onPlay={playItem}
-        />
+                <div className="grid views">
+                  {views.map((view) => {
+                    const folder = folders.find(
+                      (candidate) => candidate.Name.toLowerCase() === view.Name.toLowerCase(),
+                    );
+                    const status = folder ? statuses[folder.ItemId] : undefined;
+                    return (
+                      <button
+                        key={view.Id}
+                        type="button"
+                        className="card view"
+                        onClick={() => go({ name: "library", viewId: view.Id })}
+                      >
+                        <span className="view-icon" aria-hidden="true">
+                          <svg viewBox="0 0 24 24">
+                            <path d="M4 5.75h6l2 2h8v10.5H4z" />
+                            <path d="M4.5 9.25h15" />
+                          </svg>
+                        </span>
+                        <span className="view-copy">
+                          <span className="view-name">{view.Name}</span>
+                          <span className="muted small">
+                            {libraryLabel(view.CollectionType ?? null)}
+                          </span>
+                          {status?.state === "Done" &&
+                            status.detail?.startsWith("No supported media") && (
+                              <span className="muted small">{status.detail}</span>
+                            )}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            ) : (
+              <section className="home-empty">
+                <h2>Start building your library</h2>
+                <p className="muted">
+                  No libraries yet. Add a media folder to see your movies and shows here.
+                </p>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => go({ name: "dashboard" })}
+                >
+                  Open library settings
+                </button>
+              </section>
+            )}
+          </div>
+        </div>
       )}
     </main>
   );

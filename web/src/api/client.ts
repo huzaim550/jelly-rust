@@ -267,7 +267,7 @@ export const api = {
       params: {
         Limit: limit,
         Recursive: "true",
-        Fields: "Overview,ProductionYear,RunTimeTicks,UserData",
+        Fields: "Overview,Genres,People,ProductionYear,RunTimeTicks,UserData",
       },
     });
   },
@@ -286,7 +286,7 @@ export const api = {
         Recursive: "true",
         SortBy: "DateCreated",
         SortOrder: "Descending",
-        Fields: "Overview,ProductionYear,RunTimeTicks,UserData,DateCreated",
+        Fields: "Overview,Genres,People,ProductionYear,RunTimeTicks,UserData,DateCreated",
       },
     });
   },

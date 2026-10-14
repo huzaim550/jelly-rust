@@ -166,6 +166,12 @@ describe("dashboard", () => {
           IsFolder: false,
           ProductionYear: 2024,
           Overview: "A sample film featured on the home screen.",
+          Genres: ["Action"],
+          CommunityRating: 7.8,
+          People: [
+            { Id: "actor-1", Name: "Featured Actor", Type: "Actor" },
+            { Id: "director-1", Name: "Featured Director", Type: "Director" },
+          ],
           ImageTags: { Primary: "poster-tag" },
           BackdropImageTags: ["backdrop-tag"],
         },
@@ -177,9 +183,16 @@ describe("dashboard", () => {
 
     expect(await screen.findByText("Featured for you")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "The Feature" })).toBeInTheDocument();
-    const featuredActions = document.querySelector(".featured-actions");
+    const homeLayout = document.querySelector(".home-layout");
+    expect(homeLayout).not.toBeNull();
+    expect(homeLayout?.querySelector(".hero-banner + .home-rows")).not.toBeNull();
+    expect(homeLayout?.querySelector(".home-browser, .home-spotlight")).toBeNull();
+    expect(screen.getByText(/7\.8/)).toBeInTheDocument();
+    expect(screen.getByText("Featured Actor")).toBeInTheDocument();
+    expect(screen.queryByText("Featured Director")).not.toBeInTheDocument();
+    const featuredActions = document.querySelector(".hero-banner-actions");
     expect(featuredActions).not.toBeNull();
-    expect(within(featuredActions!).getByRole("button", { name: /^play$/i })).toBeInTheDocument();
+    expect(within(featuredActions!).getByRole("button", { name: /watch now/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /more info/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "My Libraries" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Recently Added" })).toBeInTheDocument();
@@ -200,6 +213,10 @@ describe("dashboard", () => {
       Genres: ["Drama", "Adventure"],
       CommunityRating: 8.3,
       OfficialRating: "PG-13",
+      People: [
+        { Id: "actor-1", Name: "Lead Actor", Type: "Actor" },
+        { Id: "director-1", Name: "Director", Type: "Director" },
+      ],
       ImageTags: { Primary: "poster-tag" },
       BackdropImageTags: ["backdrop-tag"],
       UserData: {
@@ -216,6 +233,9 @@ describe("dashboard", () => {
     expect(screen.getByText("A sample film description.")).toBeInTheDocument();
     expect(screen.getByText("Drama")).toBeInTheDocument();
     expect(screen.getByText("8.3")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Cast" })).toBeInTheDocument();
+    expect(screen.getByText("Lead Actor")).toBeInTheDocument();
+    expect(screen.queryByText("Director")).not.toBeInTheDocument();
     expect(document.querySelector(".detail-backdrop")).not.toBeNull();
     expect(screen.getByRole("button", { name: /add to favourites/i })).toHaveAttribute(
       "aria-pressed",

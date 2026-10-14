@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSession } from "../App";
 import { api, ApiError } from "../api/client";
-import { PosterRail, itemSubtitle } from "../components/ItemCard";
+import { PosterRail, formatDuration, itemSubtitle } from "../components/ItemCard";
 import type { BaseItem } from "../types";
 import type { Route } from "../router";
 
@@ -23,6 +23,7 @@ export function ItemDetail({
 
   const [item, setItem] = useState<BaseItem | null>(null);
   const [children, setChildren] = useState<BaseItem[]>([]);
+  const [related, setRelated] = useState<BaseItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [favoriteBusy, setFavoriteBusy] = useState(false);
@@ -47,6 +48,26 @@ export function ItemDetail({
         } else if (detail.Type === "Season" && detail.SeriesId) {
           const episodes = await api.episodes(detail.SeriesId, detail.Id);
           if (!cancelled) setChildren(episodes.Items);
+        }
+
+        // A same-genre strip for the "Sequels & Prequels" style rail. Failure
+        // here is cosmetic, so it must not fail the page.
+        if (!cancelled) {
+          void api
+            .items(userId, {
+              recursive: true,
+              includeItemTypes: "Movie,Series",
+              sortBy: "CommunityRating",
+              limit: 13,
+              fields: "Overview,Genres,ProductionYear,RunTimeTicks,UserData",
+            })
+            .then((result) => {
+              if (cancelled) return;
+              setRelated(result.Items.filter((other) => other.Id !== detail.Id).slice(0, 12));
+            })
+            .catch(() => {
+              // Leave the rail out entirely; the rest of the page stands alone.
+            });
         }
       } catch (err) {
         if (!cancelled) setError(err instanceof ApiError ? err.message : String(err));
@@ -84,6 +105,10 @@ export function ItemDetail({
   const seriesId = item.SeriesId;
   const backdropUrl = item.ImageUrls?.Backdrop || item.ImageUrls?.Primary;
   const hasBackdrop = Boolean(backdropUrl || item.ParentBackdropItemId || item.BackdropImageTags?.length);
+  // The server can send people entries without a name; they cannot be rendered.
+  const cast = (item.People ?? []).filter(
+    (person) => Boolean(person.Name) && (!person.Type || person.Type.toLowerCase() === "actor"),
+  );
 
   return (
     <main className="item-detail-page">
@@ -139,8 +164,6 @@ export function ItemDetail({
                 {item.OfficialRating && <span className="detail-cert">{item.OfficialRating}</span>}
               </div>
 
-              {item.Overview && <p className="overview">{item.Overview}</p>}
-
               {item.Genres && item.Genres.length > 0 && (
                 <div className="genres">
                   {item.Genres.map((genre) => (
@@ -149,6 +172,17 @@ export function ItemDetail({
                     </span>
                   ))}
                 </div>
+              )}
+
+              {cast.length > 0 && (
+                <section className="detail-cast" aria-labelledby="cast-heading">
+                  <h2 id="cast-heading">Cast</h2>
+                  <div className="detail-cast-list">
+                    {cast.map((person) => (
+                      <span key={person.Id}>{person.Name}</span>
+                    ))}
+                  </div>
+                </section>
               )}
 
               <div className="actions detail-actions">
@@ -175,6 +209,35 @@ export function ItemDetail({
         </div>
       </section>
 
+      <section className="detail-storyline" aria-labelledby="detail-storyline-heading">
+        <h2 id="detail-storyline-heading">Storyline &amp; Details</h2>
+        <div className="home-storyline-grid">
+          <p className="home-storyline-copy">
+            {item.Overview || "No storyline has been added for this title yet."}
+          </p>
+          <dl className="home-detail-list">
+            {item.Genres && item.Genres.length > 0 && (
+              <div>
+                <dt>Genres</dt>
+                <dd>{item.Genres.join(", ")}</dd>
+              </div>
+            )}
+            {item.RunTimeTicks ? (
+              <div>
+                <dt>Runtime</dt>
+                <dd>{formatDuration(item.RunTimeTicks)}</dd>
+              </div>
+            ) : null}
+            {item.PremiereDate && (
+              <div>
+                <dt>Released</dt>
+                <dd>{item.PremiereDate.slice(0, 10)}</dd>
+              </div>
+            )}
+          </dl>
+        </div>
+      </section>
+
       {children.length > 0 && (
         <PosterRail
           title={item.Type === "Season" ? "Episodes" : "Seasons"}
@@ -182,6 +245,16 @@ export function ItemDetail({
           items={children}
           onOpen={(child) => go({ name: "item", itemId: child.Id })}
           onPlay={(child) => onPlay({ itemId: child.Id, title: child.Name })}
+        />
+      )}
+
+      {related.length > 0 && (
+        <PosterRail
+          title="Sequels, Prequels & More Like This"
+          kicker="Keep the marathon going"
+          items={related}
+          onOpen={(other) => go({ name: "item", itemId: other.Id })}
+          onPlay={(other) => onPlay({ itemId: other.Id, title: other.Name })}
         />
       )}
     </main>

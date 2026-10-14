@@ -67,15 +67,31 @@ async function omdbGet(params: Record<string, string>): Promise<OmdbRecord> {
 }
 
 async function search(query: MetadataQuery, type: "movie" | "series"): Promise<OmdbRecord> {
-  const params: Record<string, string> = { s: query.title, type };
-  if (query.year) params.y = String(query.year);
+  const titles = [...new Set([normalizeSearchTitle(query.title), query.title.trim()])];
+  let matches: NonNullable<OmdbRecord["Search"]> = [];
+  let searchedTitle = query.title;
 
-  const result = await omdbGet(params);
-  const matches = result.Search ?? [];
+  for (const title of titles) {
+    const params: Record<string, string> = { s: title, type };
+    if (query.year) params.y = String(query.year);
+
+    try {
+      const result = await omdbGet(params);
+      matches = result.Search ?? [];
+      searchedTitle = title;
+      if (matches.length > 0) break;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/not found/i.test(message)) throw error;
+    }
+  }
+
   if (matches.length === 0) throw new Error(`no OMDb match for ${query.title}`);
 
-  const title = query.title.trim().toLowerCase();
-  const exact = matches.filter((match) => match.Title.trim().toLowerCase() === title);
+  const normalizedTitle = normalizeSearchTitle(searchedTitle).toLowerCase();
+  const exact = matches.filter(
+    (match) => normalizeSearchTitle(match.Title).toLowerCase() === normalizedTitle,
+  );
   const candidates = exact.length > 0 ? exact : matches;
   const yearMatch = query.year
     ? candidates.find((match) => match.Year.startsWith(String(query.year)))
@@ -83,6 +99,12 @@ async function search(query: MetadataQuery, type: "movie" | "series"): Promise<O
   const match = yearMatch ?? candidates[0];
   if (!match) throw new Error(`no OMDb match for ${query.title}`);
   return omdbGet({ i: match.imdbID, plot: "full" });
+}
+
+function normalizeSearchTitle(title: string): string {
+  return title
+    .replace(/\s*\[(?:hindi|tamil|telugu|malayalam|kannada|bengali|punjabi|marathi|gujarati|urdu|english)\]\s*$/i, "")
+    .trim();
 }
 
 async function fetchItem(query: MetadataQuery, type: "movie" | "series"): Promise<OmdbRecord> {
@@ -127,7 +149,7 @@ function toResult(data: OmdbRecord): MetadataResult {
   const rating = Number(data.imdbRating);
   const people: NonNullable<MetadataResult["people"]> = [];
 
-  for (const name of splitNames(data.Actors)) people.push({ name, kind: "actor" });
+  for (const name of splitNames(data.Actors)) people.push({ name, role: "Actor", kind: "actor" });
   for (const name of splitNames(data.Director)) people.push({ name, role: "Director", kind: "director" });
   for (const name of splitNames(data.Writer)) people.push({ name, role: "Writer", kind: "writer" });
 
@@ -196,8 +218,12 @@ export default definePlugin({
       return toResult(record);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (/not found|no OMDb match/i.test(message)) {
+        host.log("debug", `no OMDb match for ${query.title}`);
+        return {};
+      }
       host.log("warn", `OMDb lookup failed for ${query.title}: ${message}`);
-      return undefined;
+      throw error;
     }
   },
 });

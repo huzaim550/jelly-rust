@@ -8,6 +8,7 @@
 
 pub mod admin;
 pub mod auth;
+pub mod next_up;
 pub mod routes;
 pub mod scans;
 pub mod state;
@@ -189,7 +190,7 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/Users/{userId}/Items/Resume", get(routes::resume_items))
         .route("/Users/{userId}/Items", get(routes::user_items))
         .route("/Users/{userId}/Items/{itemId}", get(routes::user_item))
-        .route("/Users/{userId}/Shows/NextUp", get(routes::next_up))
+        .route("/Users/{userId}/Shows/NextUp", get(next_up::next_up))
         .route("/Shows/{seriesId}/Seasons", get(routes::show_seasons))
         .route("/Shows/{seriesId}/Episodes", get(routes::show_episodes))
         // Playback

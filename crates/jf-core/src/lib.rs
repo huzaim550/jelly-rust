@@ -54,6 +54,30 @@ pub enum BaseItemKind {
     MusicGenre,
 }
 
+impl BaseItemKind {
+    /// Whether items of this kind are stored as folders.
+    ///
+    /// Series, seasons and albums are navigation nodes: they exist only to
+    /// hold children, so a query that asks for them has to be allowed to
+    /// return folders even though a plain listing does not.
+    pub fn is_folder_kind(self) -> bool {
+        matches!(
+            self,
+            BaseItemKind::AggregateFolder
+                | BaseItemKind::UserRootFolder
+                | BaseItemKind::UserView
+                | BaseItemKind::CollectionFolder
+                | BaseItemKind::Folder
+                | BaseItemKind::Series
+                | BaseItemKind::Season
+                | BaseItemKind::BoxSet
+                | BaseItemKind::MusicAlbum
+                | BaseItemKind::Playlist
+                | BaseItemKind::PhotoAlbum
+        )
+    }
+}
+
 /// Collection type, used to shape top-level library views.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]

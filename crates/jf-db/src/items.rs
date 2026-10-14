@@ -151,7 +151,9 @@ impl Database {
         let mut where_sql: Vec<String> = Vec::new();
         let mut args: Vec<String> = Vec::new();
 
-        if !q.include_folders {
+        if !q.include_folders && !q.item_types.iter().any(|k| k.is_folder_kind()) {
+            // Asking for `IncludeItemTypes=Series` is asking for folders, so
+            // the folder filter would otherwise silently return nothing.
             where_sql.push("i.is_folder = 0".to_owned());
         }
         if let Some(parent) = &q.parent_id {
@@ -402,6 +404,27 @@ impl Database {
         .execute(self.pool())
         .await?;
         Ok(())
+    }
+
+    /// Series in which this user has finished at least one episode.
+    ///
+    /// "Next Up" is only meaningful for a series the user has actually started;
+    /// a fresh library should not present one row per show sitting on disk.
+    pub async fn watched_series_for_user(&self, user_id: &str) -> Result<Vec<String>> {
+        let ids = sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT i.series_id
+             FROM items i
+             JOIN user_data ud ON ud.item_id = i.id
+             WHERE ud.user_id = ?
+               AND i.kind = 'Episode'
+               AND i.series_id IS NOT NULL
+               AND (ud.played = 1 OR ud.play_count > 0)",
+        )
+        .bind(user_id)
+        .fetch_all(self.pool())
+        .await?;
+
+        Ok(ids)
     }
 
     /// The root folder item for each library, used to build `/Views`.

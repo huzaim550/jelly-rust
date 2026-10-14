@@ -190,11 +190,14 @@ impl Scanner {
             }
 
             let parsed = parser.parse(&path);
-            let parent_id = self
-                .ensure_parent(lib, &root_id, &lib.path, &path, Some(&parsed))
-                .await?;
+            let (parent_id, series_id) =
+                self.ensure_parent(lib, &root_id, &lib.path, &path, Some(&parsed))
+                    .await?;
 
-            match self.upsert_item(lib, &path, Some(&parsed), probe.as_ref(), &parent_id).await {
+            match self
+                .upsert_item(lib, &path, Some(&parsed), probe.as_ref(), &parent_id, series_id.as_deref())
+                .await
+            {
                 Ok(true) => report.added += 1,
                 Ok(false) => report.updated += 1,
                 Err(e) => {
@@ -211,8 +214,10 @@ impl Scanner {
 
     /// Ensure the library's root aggregate-folder item exists.
     async fn ensure_library_root(&self, lib: &LibraryConfig) -> DbResult<String> {
+        // Scoped by kind: in a flat TV library the series folder also sits on
+        // the library path, and the root must not adopt it.
         let existing: Option<String> =
-            sqlx::query_scalar("SELECT id FROM items WHERE library_id = ? AND path = ?")
+            sqlx::query_scalar("SELECT id FROM items WHERE library_id = ? AND path = ? AND kind = 'UserView'")
                 .bind(&lib.id)
                 .bind(lib.path.to_string_lossy().to_string())
                 .fetch_optional(self.db.pool())
@@ -255,8 +260,13 @@ impl Scanner {
         Ok(id)
     }
 
-    /// Resolve (creating if needed) the containing Series/Season folder for a
-    /// media file, mirroring Jellyfin's tv layout of `Show/Season N/episode`.
+    /// Resolve (creating if needed) the Series and Season folders a media file
+    /// belongs to, mirroring Jellyfin's `Show/Season N/episode` layout.
+    ///
+    /// Returns the parent id together with the owning series id, which is
+    /// `None` for anything outside a TV library. Episodes need both: the
+    /// parent links them into the folder tree, while the series id is what
+    /// "Next Up" groups and filters on.
     async fn ensure_parent(
         &self,
         lib: &LibraryConfig,
@@ -264,28 +274,64 @@ impl Scanner {
         lib_root: &Path,
         path: &Path,
         parsed: Option<&ParsedName>,
-    ) -> DbResult<String> {
+    ) -> DbResult<(String, Option<String>)> {
         let is_tv = lib.collection_type.eq_ignore_ascii_case("tvshows");
         if !is_tv {
-            return Ok(root_id.to_owned());
+            return Ok((root_id.to_owned(), None));
         }
 
-        let Some(parsed) = parsed else { return Ok(root_id.to_owned()) };
-        let relative = path.strip_prefix(lib_root).unwrap_or(path);
+        let Some(parsed) = parsed else { return Ok((root_id.to_owned(), None)) };
+
+        // Folders are identified by the directory that holds them, never by the
+        // media file's own path: two episodes of one series would otherwise
+        // each claim a different "series" folder and overwrite each other.
+        let relative_file = path.strip_prefix(lib_root).unwrap_or(path);
+        let episode_dir = relative_file.parent().unwrap_or(Path::new(""));
+
+        // In Jellyfin's layout the show folder is the one holding the season
+        // folders, so step up when the containing directory is a season.
+        let series_dir = match episode_dir.file_name() {
+            Some(name) if naming::is_season_dir(&name.to_string_lossy()) => {
+                episode_dir.parent().filter(|p| !p.as_os_str().is_empty())
+            }
+            Some(_) => Some(episode_dir).filter(|p| !p.as_os_str().is_empty()),
+            None => None,
+        };
+
+        // The layout is the better source of a show name; the filename is the
+        // fallback for libraries that keep every episode flat in one folder.
+        let show = series_dir
+            .and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .filter(|n| !n.is_empty())
+            .or_else(|| parsed.show_name());
+
         let mut parent = root_id.to_owned();
+        let mut series_id: Option<String> = None;
 
         // Show folder.
-        if let Some(show) = parsed.show_name() {
-            parent = self.ensure_folder(lib, &parent, &show, "Series", &relative).await?;
+        if let Some(show) = show {
+            parent = self
+                .ensure_folder(
+                    lib,
+                    &parent,
+                    &show,
+                    "Series",
+                    series_dir.unwrap_or(episode_dir),
+                    None,
+                )
+                .await?;
+            series_id = Some(parent.clone());
         }
 
-        // Season folder.
+        // Season folder. It hangs off the series, so it inherits the series id.
         if let Some(season) = parsed.season_number() {
             let season_name = format!("Season {season}");
-            parent = self.ensure_folder(lib, &parent, &season_name, "Season", &relative).await?;
+            parent = self
+                .ensure_folder(lib, &parent, &season_name, "Season", episode_dir, series_id.as_deref())
+                .await?;
         }
 
-        Ok(parent)
+        Ok((parent, series_id))
     }
 
     async fn ensure_folder(
@@ -295,28 +341,59 @@ impl Scanner {
         name: &str,
         kind: &str,
         relative: &Path,
+        series_id: Option<&str>,
     ) -> DbResult<String> {
-        let path = format!("{}/{}", lib.path.to_string_lossy(), relative.display());
+        let path = if relative.as_os_str().is_empty() {
+            // The file sits directly in the library root, so the series and
+            // season folders belong to the root itself.
+            lib.path.to_string_lossy().into_owned()
+        } else {
+            format!("{}/{}", lib.path.to_string_lossy(), relative.display())
+        };
 
+        // Scoped by kind on purpose: a flat TV library puts its episodes
+        // straight in the library root, so the series folder lands on the same
+        // path as the root `UserView` row and must not adopt it.
         if let Some(id) = sqlx::query_scalar::<_, String>(
-            "SELECT id FROM items WHERE library_id = ? AND path = ?",
+            "SELECT id FROM items WHERE library_id = ? AND path = ? AND kind = ?",
         )
         .bind(&lib.id)
         .bind(&path)
+        .bind(kind)
         .fetch_optional(self.db.pool())
         .await?
         {
+            // A series is its own series; a season belongs to its parent
+            // series. Repairing on every scan means libraries indexed by an
+            // older build pick the ids up without needing a rescan.
+            let desired: Option<String> = if kind == "Series" {
+                Some(id.clone())
+            } else {
+                series_id.map(str::to_owned)
+            };
+            if let Some(desired) = desired {
+                sqlx::query("UPDATE items SET series_id = ? WHERE id = ? AND series_id IS NULL")
+                    .bind(&desired)
+                    .bind(&id)
+                    .execute(self.db.pool())
+                    .await?;
+            }
             return Ok(id);
         }
 
         let id = new_item_id();
+        let owner: Option<String> = if kind == "Series" {
+            Some(id.clone())
+        } else {
+            series_id.map(str::to_owned)
+        };
         sqlx::query(
             "INSERT INTO items
                 (id, library_id, kind, media_type, name, sort_name, path, is_folder,
-                 parent_id, date_created, date_modified, genres_json, tags_json,
+                 parent_id, series_id, date_created, date_modified, genres_json, tags_json,
                  artists_json, taglines_json, people_json, media_sources_json,
                  image_tags_json, backdrop_json)
-             VALUES (?, ?, ?, NULL, ?, ?, ?, 1, ?, ?, ?, '[]', '[]', '[]', '[]', '[]', '[]', '{}', '[]')",
+             VALUES (?, ?, ?, NULL, ?, ?, ?, 1, ?, ?, ?, ?, '[]', '[]', '[]', '[]', '[]', '[]', '{}', '[]')",
         )
         .bind(&id)
         .bind(&lib.id)
@@ -325,6 +402,7 @@ impl Scanner {
         .bind(name)
         .bind(&path)
         .bind(parent_id)
+        .bind(&owner)
         .bind(jf_db::users::now_iso())
         .bind(jf_db::users::now_iso())
         .execute(self.db.pool())
@@ -341,12 +419,13 @@ impl Scanner {
         parsed: Option<&ParsedName>,
         probe: Option<&ProbeResult>,
         parent_id: &str,
+        series_id: Option<&str>,
     ) -> DbResult<bool> {
         let path_str = path.to_string_lossy().to_string();
         let probe = probe.expect("probe checked by caller");
 
         let existing: Option<String> =
-            sqlx::query_scalar("SELECT id FROM items WHERE path = ?")
+            sqlx::query_scalar("SELECT id FROM items WHERE path = ? AND is_folder = 0")
                 .bind(&path_str)
                 .fetch_optional(self.db.pool())
                 .await?;
@@ -370,7 +449,7 @@ impl Scanner {
             sqlx::query(
                 "UPDATE items SET name = ?, sort_name = ?, size = ?, container = ?,
                     date_modified = ?, production_year = ?, run_time_ticks = ?,
-                    parent_id = ?, media_sources_json = ?
+                    parent_id = ?, series_id = ?, media_sources_json = ?
                  WHERE id = ?",
             )
             .bind(&name)
@@ -381,6 +460,7 @@ impl Scanner {
             .bind(year)
             .bind(runtime)
             .bind(parent_id)
+            .bind(series_id)
             .bind(&media_sources)
             .bind(&id)
             .execute(self.db.pool())
@@ -390,11 +470,11 @@ impl Scanner {
                 "INSERT INTO items
                     (id, library_id, kind, media_type, name, sort_name, path, size,
                      container, production_year, run_time_ticks, parent_id,
-                     series_name, season_name, episode_title, index_number,
+                     series_id, series_name, season_name, episode_title, index_number,
                      parent_index_number, date_created, date_modified, date_last_refreshed,
                      genres_json, tags_json, artists_json, taglines_json, people_json,
                      media_sources_json, image_tags_json, backdrop_json, is_folder)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', '[]', '[]', '[]', ?, '{}', '[]', 0)",
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', '[]', '[]', '[]', ?, '{}', '[]', 0)",
             )
             .bind(&id)
             .bind(&lib.id)
@@ -408,6 +488,7 @@ impl Scanner {
             .bind(year)
             .bind(runtime)
             .bind(parent_id)
+            .bind(series_id)
             .bind(parsed.and_then(|p| p.show_name()))
             .bind(parsed.and_then(|p| p.season_number()).map(|s| format!("Season {s}")))
             .bind(parsed.and_then(|p| p.episode_title.clone()))
@@ -464,30 +545,60 @@ impl Scanner {
         Ok(())
     }
 
-    /// Delete items whose backing file disappeared, deepest-first so children
-    /// never outlive their parents.
+    /// Delete items whose backing file disappeared, then drop the series and
+    /// season folders that nothing points at any more.
     async fn reconcile_removed(&self, root_id: &str, seen: &[String]) -> DbResult<usize> {
-        let paths: Vec<String> = sqlx::query_scalar(
-            "SELECT path FROM items WHERE library_id = ? AND path != (SELECT path FROM items WHERE id = ?)",
+        // Only media files are compared against `seen`: a Series or Season row
+        // is named after a *directory*, which never appears in the file list,
+        // so including folders here would delete the whole TV tree on every
+        // scan. Folders are pruned separately, below.
+        let library_id: String =
+            sqlx::query_scalar("SELECT library_id FROM items WHERE id = ?")
+                .bind(root_id)
+                .fetch_one(self.db.pool())
+                .await?;
+
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT id, path FROM items
+             WHERE library_id = ? AND is_folder = 0 AND id != ?",
         )
-        .bind(sqlx::query_scalar::<_, String>("SELECT library_id FROM items WHERE id = ?")
-            .bind(root_id)
-            .fetch_one(self.db.pool())
-            .await?)
+        .bind(&library_id)
         .bind(root_id)
         .fetch_all(self.db.pool())
         .await?;
 
         let mut removed = 0usize;
-        for path in paths {
+        for (id, path) in rows {
             if !seen.iter().any(|s| s == &path) {
-                sqlx::query("DELETE FROM items WHERE path = ?")
-                    .bind(&path)
+                // Delete by id: two rows can legitimately share a path (a flat
+                // TV library's series folder and the library root).
+                sqlx::query("DELETE FROM items WHERE id = ?")
+                    .bind(&id)
                     .execute(self.db.pool())
                     .await?;
                 removed += 1;
             }
         }
+
+        // A series or season with no children left is a leftover from a folder
+        // the user deleted or renamed.
+        let stale: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM items
+             WHERE library_id = ? AND kind IN ('Series', 'Season')
+               AND id NOT IN (SELECT parent_id FROM items WHERE parent_id IS NOT NULL)",
+        )
+        .bind(&library_id)
+        .fetch_all(self.db.pool())
+        .await?;
+
+        for id in stale {
+            sqlx::query("DELETE FROM items WHERE id = ?")
+                .bind(&id)
+                .execute(self.db.pool())
+                .await?;
+            removed += 1;
+        }
+
         Ok(removed)
     }
 

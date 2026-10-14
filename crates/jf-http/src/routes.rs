@@ -557,6 +557,9 @@ pub async fn show_episodes(
         parent_id: season_id.or(Some(series_id)),
         item_types: vec![jf_core::BaseItemKind::Episode],
         sort_by: Some(SortBy::SortName),
+        // Episodes hang off their season, not off the series, so the whole
+        // subtree has to be searched when no season is named.
+        recursive: true,
         limit: 1000,
         ..Default::default()
     };
@@ -568,109 +571,6 @@ pub async fn show_episodes(
         .map_err(ApiError::from)?;
 
     Ok(Json(result))
-}
-
-/// `GET /Users/{userId}/Shows/NextUp`
-pub async fn next_up(
-    State(app): State<Shared>,
-    Path(user_id): Path<String>,
-    auth: RequireAuth,
-    Query(params): Query<HashMap<String, String>>,
-) -> Result<Json<jf_core::QueryResult<jf_core::BaseItemDto>>, ApiError> {
-    authorize_user(&auth.0, &user_id)?;
-    let limit = params
-        .get("limit")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(20)
-        .clamp(1, 100);
-
-    // A series counts as "started" once the user has marked any of its
-    // episodes played. Only those series have a meaningful "next up".
-    // Series with no watched episode have nothing to be "next" to.
-    let watched_series: Vec<String> = sqlx::query_scalar(
-        "SELECT DISTINCT i.series_id
-         FROM items i
-         JOIN user_data ud ON ud.item_id = i.id
-         WHERE ud.user_id = ?
-           AND i.type = 'Episode'
-           AND i.series_id IS NOT NULL
-           AND (ud.played = 1 OR ud.play_count > 0)",
-    )
-    .bind(auth.0.id())
-    .fetch_all(app.db.pool())
-    .await
-    .map_err(|e| ApiError::from(jf_db::DbError::from(e)))?;
-
-    if watched_series.is_empty() {
-        return Ok(Json(jf_core::QueryResult {
-            items: Vec::new(),
-            total_record_count: 0,
-            start_index: 0,
-        }));
-    }
-
-    // Candidates: unwatched episodes that belong to a started series.
-    // Sorted so that within a series we pick the lowest (season, episode)
-    // first. `publish` order is fine for ordering different series because
-    // the final selection respects `limit` only.
-    let candidate_query = ItemQuery {
-        item_types: vec![jf_core::BaseItemKind::Episode],
-        unplayed_only: true,
-        sort_by: Some(SortBy::SortName),
-        limit: 500,
-        recursive: true,
-        ..Default::default()
-    };
-
-    let all = app
-        .db
-        .query_items(Some(&user_id), &candidate_query, &FieldSelection::all(), &app.server_id)
-        .await
-        .map_err(ApiError::from)?;
-
-    // One "next up" per series, chosen by (season, episode).
-    let mut chosen: Vec<jf_core::BaseItemDto> = Vec::new();
-    let mut seen_series: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    // Iterate episodes in series/season/episode order.
-    let mut ordered: Vec<_> = all.items.into_iter().collect();
-    ordered.sort_by(|a, b| {
-        use std::cmp::Ordering;
-        a.series_id.clone().map(String::from).unwrap_or_default().as_str().cmp(
-            &b.series_id.clone().map(String::from).unwrap_or_default().as_str())
-            .then_with(|| a.parent_index_number.unwrap_or(0).cmp(&b.parent_index_number.unwrap_or(0)))
-            .then_with(|| a.index_number.unwrap_or(0).cmp(&b.index_number.unwrap_or(0)))
-    });
-
-    // Move episodes out of `ordered` while tracking the owning series as a
-    // plain `String`, so the borrow of `episode.series_id` ends before the
-    // list is consumed.
-    let mut iter = ordered.into_iter();
-    while let Some(episode) = iter.next() {
-        let Some(series_id) = episode.series_id.clone() else { continue };
-        if !watched_series.contains(&series_id) {
-            continue;
-        }
-        if seen_series.contains(&series_id) {
-            // Close the closure over a clone so `seen_series` and `episode`
-            // never alias each other.
-            let _ = ();
-            continue;
-        }
-
-        seen_series.insert(series_id);
-        chosen.push(episode);
-        if chosen.len() >= limit {
-            break;
-        }
-    }
-
-    let total = chosen.len();
-    Ok(Json(jf_core::QueryResult {
-        items: chosen,
-        total_record_count: total,
-        start_index: 0,
-    }))
 }
 
 fn build_item_query(params: &ItemsQuery) -> ItemQuery {
@@ -709,7 +609,11 @@ fn build_item_query(params: &ItemsQuery) -> ItemQuery {
 }
 
 /// A user may only read their own data unless they are an administrator.
-fn authorize_user(auth: &AuthUser, user_id: &str) -> Result<(), ApiError> {
+/// Reject requests for another user's data.
+///
+/// A user may read their own rows; anything else is forbidden unless the
+/// caller is an administrator, matching Jellyfin's policy checks.
+pub(crate) fn authorize_user(auth: &AuthUser, user_id: &str) -> Result<(), ApiError> {
     if auth.user.id == user_id || auth.is_admin() {
         return Ok(());
     }

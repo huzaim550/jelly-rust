@@ -24,7 +24,11 @@ pub struct ParsedName {
     pub episode: Option<u32>,
     /// Episode title when the name uses `SxxEyy - Title` form.
     pub episode_title: Option<String>,
-    /// Show name for files under a tv library.
+    /// Show name, taken from the text before the episode marker.
+    ///
+    /// This is the fallback for libraries that keep every episode flat in one
+    /// folder; when episodes live in `Show/Season 01/`, the folder layout is a
+    /// better source and the scanner prefers it.
     pub show: Option<String>,
 }
 
@@ -89,15 +93,26 @@ impl NameParser {
                 stem.split_once(" - ").map(|(show, _)| show.trim().to_owned())
             });
 
-        // Prefer a sibling directory as the show name; the caller sets `show`
-        // from the library layout, so leave it None here.
+        // "Show - S01E02 - Title" names the show before the marker. Take it
+        // from there so a flat library still groups episodes into a series.
+        let show = stem
+            .split_once(" - ")
+            .map(|(head, _)| head)
+            .or_else(|| {
+                // "Show.S01E02.Title" — everything before the marker.
+                find_episode_marker(&lower).map(|at| &stem[..at])
+            })
+            .map(|head| head.trim_matches(|c: char| c == '-' || c == '.' || c == '_' || c.is_whitespace()))
+            .filter(|head| !head.is_empty() && !is_marker_only(head))
+            .map(|head| tidy(head));
+
         Some(ParsedName {
             title: title.clone().unwrap_or_else(|| stem.to_owned()),
             year: None,
             season,
             episode,
             episode_title: title.clone(),
-            show: None,
+            show,
         })
     }
 
@@ -236,6 +251,69 @@ fn split_x_y(lower: &str) -> Option<(u32, u32)> {
         return None;
     }
     Some((left.parse().ok()?, right_digits.parse().ok()?))
+}
+
+/// Byte offset of an `s01e02` / `1x02` marker in a lowercased filename.
+///
+/// The marker must not start in the middle of a word, so `Sopranos2x04` is
+/// rejected in favour of `The.Sopranos.2x04`.
+fn find_episode_marker(lower: &str) -> Option<usize> {
+    let bytes = lower.as_bytes();
+
+    let is_word = |i: usize| i > 0 && (bytes[i - 1] as char).is_alphanumeric();
+    let digit_run = |from: usize| -> usize {
+        bytes[from..].iter().take_while(|b| b.is_ascii_digit()).count()
+    };
+
+    for i in 0..bytes.len() {
+        if is_word(i) {
+            continue;
+        }
+        match bytes[i] {
+            // s01e02, optionally followed by more episodes (s01e02e03).
+            b's' => {
+                let season_len = digit_run(i + 1);
+                if season_len == 0 {
+                    continue;
+                }
+                let e = i + 1 + season_len;
+                if e < bytes.len() && bytes[e] == b'e' && digit_run(e + 1) > 0 {
+                    return Some(i);
+                }
+            }
+            // 1x02
+            _ => {
+                let season_len = digit_run(i);
+                if season_len == 0 {
+                    continue;
+                }
+                let x = i + season_len;
+                if x < bytes.len() && bytes[x] == b'x' && digit_run(x + 1) > 0 {
+                    return Some(i);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Whether a fragment is nothing but an episode marker (`01x02`, `S01E02`).
+///
+/// Such a fragment is a filename, not a show name: `01x02 - Title.mkv` has no
+/// series to attach to.
+fn is_marker_only(fragment: &str) -> bool {
+    find_episode_marker(&fragment.to_ascii_lowercase()) == Some(0)
+}
+
+/// Whether a directory name is a season folder (`Season 01`, `Specials`).
+pub fn is_season_dir(name: &str) -> bool {
+    let lower = name.trim().to_ascii_lowercase();
+    if lower == "specials" || lower == "special" {
+        return true;
+    }
+    let rest = lower.strip_prefix("season").map(str::trim_start).unwrap_or("");
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    !digits.is_empty() && rest[digits.len()..].trim().is_empty()
 }
 
 /// Split `Title (1999)` / `Title [1999]`, validating the year range.
@@ -426,6 +504,37 @@ mod tests {
         let p = parse("01x02 - The Title.mkv");
         assert_eq!(p.season, Some(1));
         assert_eq!(p.episode, Some(2));
+    }
+
+    #[test]
+    fn show_name_comes_from_before_the_marker() {
+        let p = parse("Twin Peaks - S01E01 - Pilot.mkv");
+        assert_eq!(p.show.as_deref(), Some("Twin Peaks"));
+        assert_eq!(p.episode_title.as_deref(), Some("Pilot"));
+
+        // Dotted release naming works too.
+        let dotted = parse("The.Office.S02E05.mkv");
+        assert_eq!(dotted.show.as_deref(), Some("The Office"));
+    }
+
+    #[test]
+    fn a_bare_marker_is_not_a_show_name() {
+        // "01x02 - Title" has no series to belong to.
+        assert_eq!(parse("01x02 - The Title.mkv").show, None);
+        assert_eq!(parse("S01E02.mkv").show, None);
+        // Movies never produce one.
+        assert_eq!(parse("The Matrix (1999).mkv").show, None);
+    }
+
+    #[test]
+    fn season_directories_are_recognized() {
+        assert!(is_season_dir("Season 01"));
+        assert!(is_season_dir("season 12"));
+        assert!(is_season_dir("Season2"));
+        assert!(is_season_dir("Specials"));
+        assert!(!is_season_dir("Season One Finale"));
+        assert!(!is_season_dir("Twin Peaks"));
+        assert!(!is_season_dir("Season"));
     }
 
     #[test]

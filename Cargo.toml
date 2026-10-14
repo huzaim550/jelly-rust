@@ -8,6 +8,7 @@ members = [
     "crates/jf-http",
     "crates/jf-plugins",
     "crates/jf-server",
+    "crates/jf-admin",
 ]
 
 [workspace.package]
@@ -19,24 +20,23 @@ rust-version = "1.85"
 [workspace.dependencies]
 jf-core = { path = "crates/jf-core" }
 jf-db = { path = "crates/jf-db" }
-jf-scan = { path = "crates/jf-scan" }
 jf-playback = { path = "crates/jf-playback" }
 jf-http = { path = "crates/jf-http" }
 jf-plugins = { path = "crates/jf-plugins" }
+jf-scan = { path = "crates/jf-scan" }
 
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "fs", "sync", "time", "process", "signal"] }
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "chrono", "uuid", "migrate"] }
 axum = { version = "0.8.9", features = ["macros", "ws"] }
-tower-http = { version = "0.7.1", features = ["trace", "cors", "compression-gzip", "compression-brotli"] }
+tower-http = { version = "0.7.1", features = ["trace", "cors", "compression-gzip", "compression-br", "compression-zstd"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 thiserror = "2"
 uuid = { version = "1.28.0", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
-pyo3 = { version = "0.29.3" }
 ffmpeg-sidecar = "2.6.0"
 notify = "8.2.0"
 rayon = "1.12.0"

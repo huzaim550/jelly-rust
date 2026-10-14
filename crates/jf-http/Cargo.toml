@@ -6,3 +6,27 @@ license.workspace = true
 
 [dependencies]
 jf-core = { workspace = true }
+jf-db = { workspace = true }
+jf-scan = { workspace = true }
+jf-playback = { workspace = true }
+jf-plugins = { workspace = true }
+
+axum = { workspace = true }
+tower-http = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+futures = { workspace = true }
+mime_guess = { workspace = true }
+sqlx = { workspace = true }
+uuid = { workspace = true }
+bytes = "1"
+tokio-util = "0.7"
+async-stream = "0.3"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

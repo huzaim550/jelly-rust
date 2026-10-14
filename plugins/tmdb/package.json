@@ -1,0 +1,22 @@
+{
+  "name": "tmdb-provider",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "TMDB metadata provider for jellyfin-clone",
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@jellyfin-clone/pluginhost": "file:../../pluginhost"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.9.3"
+  }
+}

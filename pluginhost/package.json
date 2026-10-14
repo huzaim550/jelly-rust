@@ -1,0 +1,32 @@
+{
+  "name": "@jellyfin-clone/pluginhost",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Node runtime that loads and runs jellyfin-clone plugins",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsc -p tsconfig.json --watch"
+  },
+  "dependencies": {
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.9.3"
+  },
+  "exports": {
+    "./sdk": {
+      "types": "./dist/sdk.d.ts",
+      "default": "./dist/sdk.js"
+    }
+  },
+  "files": [
+    "dist"
+  ]
+}

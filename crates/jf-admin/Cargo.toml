@@ -1,0 +1,23 @@
+[package]
+name = "jf-admin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "jf-admin"
+path = "src/main.rs"
+
+[dependencies]
+jf-core = { workspace = true }
+jf-db = { workspace = true }
+jf-scan = { workspace = true }
+jf-playback = { workspace = true }
+jf-plugins = { workspace = true }
+
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }

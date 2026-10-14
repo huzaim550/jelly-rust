@@ -10,3 +10,17 @@ path = "src/main.rs"
 
 [dependencies]
 jf-core = { workspace = true }
+jf-db = { workspace = true }
+jf-scan = { workspace = true }
+jf-http = { workspace = true }
+jf-plugins = { workspace = true }
+jf-playback = { workspace = true }
+
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+axum = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

@@ -10,7 +10,7 @@ pub mod subtitle;
 pub mod transcode;
 
 pub use hls::{HlsSession, HlsSessionManager};
-pub use image::{ImageCache, ImageRequest};
+pub use image::{ImageCache, ImageKind, ImageRequest};
 pub use subtitle::{SubtitleKind, SubtitleRequest};
 pub use transcode::{ClientCapabilities, DirectStream, PlaybackPlan, PlayMethod, StreamSelection, Transcoder};
 

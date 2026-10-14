@@ -3,6 +3,7 @@
 //! Uses the runtime (non-macro) query API so the crate builds without a
 //! `DATABASE_URL` or a pre-generated `.sqlx` cache.
 
+pub mod items;
 pub mod users;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};

@@ -5,3 +5,8 @@ jellyfin/
 /target/
 __pycache__/
 *.pyc
+web/dist/
+pluginhost/dist/
+plugins/*/dist/
+node_modules/
+jf-data/

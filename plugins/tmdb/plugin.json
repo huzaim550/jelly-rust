@@ -1,0 +1,12 @@
+{
+  "id": "tmdb",
+  "name": "TMDB Metadata Provider",
+  "version": "1.0.0",
+  "description": "Fetches movie, series, and episode metadata from The Movie Database.",
+  "author": "jellyfin-clone contributors",
+  "apiVersion": "1.0",
+  "entry": "dist/index.js",
+  "capabilities": ["readItems", "network", "config", "events"],
+  "metadataProviders": ["tmdb"],
+  "dependsOn": []
+}

@@ -411,6 +411,10 @@ pub struct BaseItemDto {
     pub is_live_stream: bool,
     #[serde(rename = "ExternalUrls", skip_serializing_if = "Vec::is_empty", default)]
     pub external_urls: Vec<ExternalUrlRef>,
+    /// Per-user playback state. Present only on authenticated item responses;
+    /// it is what makes "continue watching" and resume positions work.
+    #[serde(rename = "UserData", skip_serializing_if = "Option::is_none")]
+    pub user_data: Option<UserItemDataDto>,
 }
 
 /// External id link on an item.

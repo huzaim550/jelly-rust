@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -112,8 +112,13 @@ impl ImageCache {
 
     /// Generate a thumbnail for a media file at `timestamp_secs`.
     ///
-    /// Returns `Ok(None)` when ffmpeg is unavailable or the file has no video
-    /// track, so callers can fall back to a default poster.
+    /// Returns `Ok(None)` when ffmpeg is unavailable or no frame could be
+    /// extracted, so callers can fall back to a default poster.
+    ///
+    /// Seeking past the end of a short clip produces no frames at all, which
+    /// is the usual failure here: a 10%-in offset on a 4-second file lands in
+    /// nothing. Rather than guessing a safe timestamp up front, try the
+    /// requested one and walk backwards until a frame appears.
     pub async fn generate_video_thumbnail(
         &self,
         source: &Path,
@@ -141,33 +146,57 @@ impl ImageCache {
             tokio::fs::create_dir_all(parent).await?;
         }
 
-        // Seek near the target, then decode the next keyframe. `-ss` before
-        // `-i` is far faster than after it.
+        // Offsets to try, in order: the requested one, halfway back, then
+        // small fixed offsets that land inside almost any clip.
+        let mut candidates = vec![timestamp_secs.max(0.0)];
+        if timestamp_secs > 2.0 {
+            candidates.push(timestamp_secs / 2.0);
+        }
+        candidates.extend([1.0, 0.0]);
+
+        for offset in candidates {
+            if self.extract_frame(source, output, offset, width).await? {
+                return Ok(Some(self.describe(output)));
+            }
+        }
+
+        // Clean up any empty file ffmpeg may have created.
+        let _ = tokio::fs::remove_file(output).await;
+        Ok(None)
+    }
+
+    /// Run ffmpeg to extract a single frame at `offset_secs`.
+    ///
+    /// Returns `Ok(true)` when an image was written.
+    async fn extract_frame(
+        &self,
+        source: &Path,
+        output: &Path,
+        offset_secs: f64,
+        width: Option<u32>,
+    ) -> Result<bool, ImageError> {
+        // `-ss` before `-i` seeks by keyframe, which is far faster than
+        // decoding up to the target and then decoding again.
         let mut cmd = tokio::process::Command::new(self.ffmpeg.as_str());
         cmd.arg("-hide_banner")
             .arg("-loglevel")
             .arg("error")
             .arg("-ss")
-            .arg(format!("{timestamp_secs:.3}"))
+            .arg(format!("{offset_secs:.3}"))
             .arg("-i")
             .arg(source)
             .args(["-frames:v", "1", "-q:v", "3"]);
 
         if let Some(w) = width {
-            cmd.args(["-vf", &format!("scale={w}:-2")]);
+            // Convert to 8-bit 4:2:0 first: several encoders reject the
+            // high-bit-depth and 4:4:4 sources modern cameras produce.
+            cmd.arg("-vf").arg(format!("format=yuvj420p,scale={w}:-2"));
         }
 
         cmd.arg("-y").arg(output).stdout(Stdio::null()).stderr(Stdio::null());
 
         let status = cmd.status().await.map_err(ImageError::Spawn)?;
-
-        if !status.success() || !output.is_file() {
-            // Clean up the empty file ffmpeg may have created.
-            let _ = tokio::fs::remove_file(output).await;
-            return Ok(None);
-        }
-
-        Ok(Some(self.describe(output)))
+        Ok(status.success() && output.is_file())
     }
 
     /// Return an existing sidecar image, if it is one of the types we serve.
@@ -259,6 +288,50 @@ mod tests {
         assert_eq!(content_type_for(Path::new("a.jpg")).as_deref(), Some("image/jpeg"));
         assert_eq!(content_type_for(Path::new("a.PNG")).as_deref(), Some("image/png"));
         assert_eq!(content_type_for(Path::new("a.txt")), None);
+    }
+
+    /// Regression: a 10%-in offset on a short clip seeks past the end and
+    /// produces no frame at all. The retry ladder must still yield one.
+    #[tokio::test]
+    async fn thumbnail_of_short_clip_falls_back_earlier() {
+        if std::process::Command::new("ffmpeg").arg("-version").output().is_err() {
+            return;
+        }
+
+        let dir = std::env::temp_dir().join("jf-thumb-short");
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let source = dir.join("clip.mkv");
+        let fixture = source.clone();
+        let output = dir.join("out.jpg");
+
+        // A 4-second clip: asking for 10s must still produce a frame.
+        // Creating the fixture is blocking; keep it off the async runtime.
+        let made = tokio::task::spawn_blocking(move || {
+            std::process::Command::new("ffmpeg")
+                .args(["-f", "lavfi", "-i", "testsrc=duration=4:size=320x240:rate=10",
+                       "-c:v", "libx264", "-preset", "ultrafast", "-y"])
+                .arg(&fixture)
+                .output()
+                .unwrap()
+        })
+        .await
+        .unwrap();
+        if !made.status.success() {
+            let _ = tokio::fs::remove_dir_all(&dir).await;
+            return;
+        }
+
+        let cache = ImageCache::new(dir.join("cache"));
+        let result = cache
+            .generate_video_thumbnail(&source, &output, 10.0, Some(200))
+            .await
+            .expect("no error");
+
+        assert!(result.is_some(), "a 4s clip must still yield a thumbnail");
+        let meta = std::fs::metadata(&output).expect("file written");
+        assert!(meta.len() > 0, "thumbnail must not be empty");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
     #[test]

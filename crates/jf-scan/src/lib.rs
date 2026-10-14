@@ -191,16 +191,20 @@ impl Scanner {
                 .await?;
 
         if let Some(id) = existing {
+            // Refresh the kind on rescan so a root created by an older version
+            // self-heals instead of staying mis-typed forever.
+            sqlx::query("UPDATE items SET kind = 'UserView' WHERE id = ?")
+                .bind(&id)
+                .execute(self.db.pool())
+                .await?;
             return Ok(id);
         }
 
         let id = new_item_id();
-        let kind = match lib.collection_type.as_str() {
-            "movies" | "Movies" => "Movie",
-            "tvshows" | "TvShows" => "Series",
-            "music" | "Music" => "MusicAlbum",
-            _ => "CollectionFolder",
-        };
+        // The root is a navigation node. Its collection type is what tells a
+        // client how to present the library; its kind stays a folder so it is
+        // never mistaken for a playable item.
+        let kind = "UserView";
 
         sqlx::query(
             "INSERT INTO items

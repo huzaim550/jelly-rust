@@ -1,0 +1,7 @@
+jellyfin/
+
+# Phase 0 spike scratch
+/spikes/
+/target/
+__pycache__/
+*.pyc

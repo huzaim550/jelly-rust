@@ -1,0 +1,21 @@
+[package]
+name = "jf-playback"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+jf-core = { workspace = true }
+jf-scan = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+axum = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

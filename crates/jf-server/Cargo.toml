@@ -1,0 +1,12 @@
+[package]
+name = "jf-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "jellyfin-clone"
+path = "src/main.rs"
+
+[dependencies]
+jf-core = { workspace = true }

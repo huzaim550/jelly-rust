@@ -261,14 +261,33 @@ impl PluginHost {
             )
         })?;
 
-        let mut child = Command::new("node")
-            .arg(&entry)
-            .current_dir(
-                entry
-                    .parent()
-                    .and_then(Path::parent)
-                    .unwrap_or_else(|| Path::new(".")),
-            )
+        // Make the plugin host's own node_modules reachable by plugins that were
+        // copied elsewhere. Their relative `@jellyfin-clone/pluginhost` link
+        // only resolves from their original location, which breaks any install
+        // into a different directory. NODE_PATH is one of the roots Node
+        // consults before walking up from the importing file, so adding the
+        // host's package directory makes the SDK importable everywhere.
+        let mut env: Vec<(String, std::ffi::OsString)> = Vec::new();
+        if let Some(host_root) = entry.parent().and_then(Path::parent) {
+            let mut search = host_root.to_string_lossy().into_owned();
+            if let Some(existing) = std::env::var_os("NODE_PATH") {
+                search.push(':');
+                search.push_str(&existing.to_string_lossy());
+            }
+            env.push(("NODE_PATH".to_owned(), search.into()));
+        }
+
+        let mut cmd = Command::new("node");
+        cmd.arg(&entry).current_dir(
+            entry
+                .parent()
+                .and_then(Path::parent)
+                .unwrap_or_else(|| Path::new(".")),
+        );
+        for (key, value) in &env {
+            cmd.env(key, value);
+        }
+        let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

@@ -68,6 +68,28 @@ impl StreamType {
     }
 }
 
+/// Map an ffprobe container alias to an extension-style name.
+///
+/// Only used as a fallback when the file has no extension; the extension is
+/// authoritative because it is what the client actually receives.
+pub fn normalise_container(format_name: &str) -> String {
+    // ffprobe reports aliases as a comma-separated list; the first one is the
+    // format's own name and the rest are compatible spellings.
+    let first = format_name
+        .split(',')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+
+    match first.as_str() {
+        "matroska" | "webm" => "mkv".to_owned(),
+        "mpegts" => "ts".to_owned(),
+        // An unknown name passes through unchanged rather than being mangled.
+        other => other.to_owned(),
+    }
+}
+
 /// Result of probing one file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProbeResult {
@@ -244,11 +266,23 @@ impl Prober {
             })
             .collect();
 
-        let container = raw.format.format_name.as_ref().and_then(|f| {
-            f.split(',')
-                .next()
-                .map(|s| s.trim().to_owned())
-        });
+        // Use the file extension as the container name.
+        //
+        // ffprobe's `format_name` is a comma-separated list of aliases
+        // ("matroska,webm"), which matches nothing in a client's direct-play
+        // list — those are extension names like "mkv". Taking the first alias
+        // meant every .mkv file was judged unplayable and forced a transcode.
+        let container = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .or_else(|| {
+                raw.format.format_name.as_ref().and_then(|f| {
+                    f.split(',')
+                        .next()
+                        .map(|alias| normalise_container(alias))
+                })
+            });
 
         ProbeResult {
             path: path.to_string_lossy().into_owned(),
@@ -320,6 +354,23 @@ impl ProbeResult {
             .copied()
             .find(|s| s.is_default)
             .or_else(|| subs.iter().copied().find(|s| s.is_forced))
+    }
+}
+
+#[cfg(test)]
+mod container_tests {
+    use super::normalise_container;
+
+    #[test]
+    fn ffprobe_aliases_map_to_extension_names() {
+        // These are the aliases ffprobe actually emits for the containers a
+        // browser client is most likely to meet.
+        assert_eq!(normalise_container("matroska,webm"), "mkv");
+        assert_eq!(normalise_container("matroska"), "mkv");
+        assert_eq!(normalise_container("mpegts"), "ts");
+        assert_eq!(normalise_container("mov,mp4,m4a"), "mov");
+        // An unknown name is passed through rather than mangled.
+        assert_eq!(normalise_container("flac"), "flac");
     }
 }
 

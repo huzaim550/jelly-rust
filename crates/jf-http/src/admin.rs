@@ -203,7 +203,11 @@ pub async fn post_startup_complete(
 // ---------------------------------------------------------------------------
 
 /// Collection types Jellyfin supports, as its enum values.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Parsed case-insensitively: Jellyfin clients, this project's web client,
+/// and the command-line all spell this type differently, and rejecting a
+/// library because of a capital letter would be absurd.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum CollectionTypeOptions {
     Movies,
@@ -214,6 +218,31 @@ pub enum CollectionTypeOptions {
     Photos,
     Playlists,
     Mixed,
+}
+
+impl<'de> serde::Deserialize<'de> for CollectionTypeOptions {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        let kind = match raw.trim().to_ascii_lowercase().as_str() {
+            "movies" => Self::Movies,
+            "tvshows" | "tv" | "episodes" => Self::TvShows,
+            "music" => Self::Music,
+            "musicvideos" => Self::MusicVideos,
+            "books" | "audiobooks" => Self::Books,
+            "photos" => Self::Photos,
+            "playlists" => Self::Playlists,
+            "mixed" => Self::Mixed,
+            value => {
+                return Err(serde::de::Error::custom(format!(
+                    "unknown collection type `{value}`"
+                )))
+            }
+        };
+        Ok(kind)
+    }
 }
 
 impl CollectionTypeOptions {

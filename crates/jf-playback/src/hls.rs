@@ -82,13 +82,16 @@ impl HlsSessionManager {
         };
 
         // Segment paths in the plan were built for the scratch dir, so rebuild
-        // them here in case the caller passed a different directory.
-        let command = retarget_output(&command, &directory, &output);
+        // them here to point at this session. The rewritten .m3u8 path is
+        // *this session's* playlist — not the plan's scratch output path —
+        // otherwise wait_for_playlist looks in the wrong directory.
+        let session_playlist = directory.join("output.m3u8");
+        let command = retarget_output(&command, &directory, &session_playlist);
 
         let mut child = tokio::process::Command::new(self.transcoder_ffmpeg())
             .args(&command)
             .kill_on_drop(true)
-            .spawn()
+.spawn()
             .map_err(|e| crate::transcode::TranscodeError::NoFfmpeg(e.to_string()))?;
 
         let session = Arc::new(HlsSession {
@@ -217,6 +220,7 @@ impl HlsSessionManager {
     pub async fn active_count(&self) -> usize {
         self.sessions.lock().await.len()
     }
+
 }
 
 impl HlsSession {
@@ -227,6 +231,37 @@ impl HlsSession {
     /// Seconds since the session started, for the playback info response.
     pub fn elapsed_secs(&self) -> u64 {
         self.created_at.elapsed().as_secs()
+    }
+
+    /// Wait for ffmpeg to write the playlist, then return its path.
+    ///
+    /// ffmpeg creates the playlist asynchronously, so a client that requests it
+    /// immediately would otherwise get a 404 and report playback as broken.
+    /// Returns the path whether or not the file appeared, so the caller can
+    /// produce a meaningful error from the read that follows.
+    pub async fn wait_for_playlist(&self, timeout: std::time::Duration) -> Result<PathBuf, HlsError> {
+        let path = self.directory.join("output.m3u8");
+        let deadline = tokio::time::Instant::now() + timeout;
+
+        loop {
+            if tokio::fs::try_exists(&path).await.unwrap_or(false) {
+                // A playlist with no segments yet is not playable, so keep
+                // waiting for ffmpeg to finish the first one.
+                let usable = tokio::fs::read_to_string(&path)
+                    .await
+                    .map(|text| !text.trim().is_empty())
+                    .unwrap_or(false);
+                if usable {
+                    return Ok(path);
+                }
+            }
+
+            if tokio::time::Instant::now() >= deadline {
+                return Ok(path);
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        }
     }
 }
 

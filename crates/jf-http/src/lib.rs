@@ -195,6 +195,8 @@ pub fn router(app: Arc<AppState>) -> Router {
         // Playback
         .route("/Items/{itemId}/PlaybackInfo", get(routes::playback_info))
         .route("/Videos/{itemId}/stream", get(routes::stream_video))
+        .route("/Videos/{itemId}/master.m3u8", get(routes::hls_master))
+        .route("/transcode/{sessionId}/{segment}", get(routes::hls_segment))
         .route("/UserPlayedItems/{itemId}/Progress", post(routes::report_progress))
         .route("/UserFavoriteItems/{itemId}", post(routes::favorite))
         .route("/UserFavoriteItems/{itemId}", delete(routes::favorite))

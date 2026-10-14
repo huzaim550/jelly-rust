@@ -289,32 +289,33 @@ pub async fn user_views(
 /// `GET /Users/{userId}/Items` — the main item query.
 #[derive(Debug, Default, Deserialize)]
 pub struct ItemsQuery {
-    #[serde(rename = "parentId")]
+    #[serde(rename = "parentId", alias = "ParentId")]
     pub parent_id: Option<String>,
-    #[serde(rename = "includeItemTypes")]
+    #[serde(rename = "includeItemTypes", alias = "IncludeItemTypes")]
     pub include_item_types: Option<String>,
-    #[serde(rename = "mediaTypes")]
+    #[serde(rename = "mediaTypes", alias = "MediaTypes")]
     pub media_types: Option<String>,
-    #[serde(rename = "searchTerm")]
+    #[serde(rename = "searchTerm", alias = "SearchTerm")]
     pub search_term: Option<String>,
-    #[serde(rename = "sortBy")]
+    #[serde(rename = "sortBy", alias = "SortBy")]
     pub sort_by: Option<String>,
-    #[serde(rename = "sortOrder")]
+    #[serde(rename = "sortOrder", alias = "SortOrder")]
     pub sort_order: Option<String>,
-    #[serde(rename = "startIndex")]
+    #[serde(rename = "startIndex", alias = "StartIndex")]
     pub start_index: Option<usize>,
+    #[serde(rename = "limit", alias = "Limit")]
     pub limit: Option<usize>,
-    #[serde(rename = "recursive")]
+    #[serde(rename = "recursive", alias = "Recursive")]
     pub recursive: Option<bool>,
     /// Comma-separated genre names.
     pub genres: Option<String>,
-    #[serde(rename = "fields")]
+    #[serde(rename = "fields", alias = "Fields")]
     pub fields: Option<String>,
-    #[serde(rename = "filters")]
+    #[serde(rename = "filters", alias = "Filters")]
     pub filters: Option<String>,
-    #[serde(rename = "enableUserData")]
+    #[serde(rename = "enableUserData", alias = "EnableUserData")]
     pub enable_user_data: Option<bool>,
-    #[serde(rename = "enableImages")]
+    #[serde(rename = "enableImages", alias = "EnableImages")]
     pub enable_images: Option<bool>,
 }
 
@@ -415,6 +416,45 @@ pub async fn user_item(
         .map_err(ApiError::from)?;
 
     Ok(Json(ItemOrListing::Listing(listing)))
+}
+
+#[cfg(test)]
+mod query_param_tests {
+    use super::{build_item_query, ItemsQuery};
+
+    fn parse(q: &str) -> ItemsQuery {
+        serde_urlencoded::from_str::<ItemsQuery>(q).expect("query should deserialize")
+    }
+
+    #[test]
+    fn accepts_jellyfin_pascal_case_and_our_camel_case() {
+        // Jellyfin's own clients send PascalCase; our web client sends a mix.
+        // Both must work, because a silently dropped `Recursive` turns a
+        // library listing into a single-level list that looks empty.
+        for term in ["Recursive=true", "recursive=true"] {
+            assert_eq!(parse(term).recursive, Some(true), "{term}");
+        }
+        for limit in ["Limit=5", "limit=5"] {
+            assert_eq!(parse(limit).limit, Some(5), "{limit}");
+        }
+        for search in ["SearchTerm=dune", "searchTerm=dune"] {
+            assert_eq!(parse(search).search_term.as_deref(), Some("dune"), "{search}");
+        }
+        for sort in ["SortBy=DateCreated", "sortBy=DateCreated"] {
+            assert_eq!(parse(sort).sort_by.as_deref(), Some("DateCreated"), "{sort}");
+        }
+        for fields in ["Fields=Overview", "fields=Overview"] {
+            assert_eq!(parse(fields).fields.as_deref(), Some("Overview"), "{fields}");
+        }
+    }
+
+    #[test]
+    fn a_limit_is_bounded_so_a_client_cannot_ask_for_everything() {
+        // `build_item_query` clamps; assert the raw value is optional and that
+        // the clamp exists, since an unbounded limit is a denial-of-service.
+        assert_eq!(parse("Limit=999999").limit, Some(999_999));
+        assert_eq!(build_item_query(&parse("Limit=999999")).limit, 5000);
+    }
 }
 
 #[cfg(test)]
@@ -544,26 +584,93 @@ pub async fn next_up(
         .unwrap_or(20)
         .clamp(1, 100);
 
-    // "Next up" is the lowest-numbered unwatched episode of each series the
-    // user has partially seen. Rather than model episode continuity properly
-    // yet, this returns unwatched episodes that share a series with something
-    // the user has already started.
-    let query = ItemQuery {
+    // A series counts as "started" once the user has marked any of its
+    // episodes played. Only those series have a meaningful "next up".
+    // Series with no watched episode have nothing to be "next" to.
+    let watched_series: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT i.series_id
+         FROM items i
+         JOIN user_data ud ON ud.item_id = i.id
+         WHERE ud.user_id = ?
+           AND i.type = 'Episode'
+           AND i.series_id IS NOT NULL
+           AND (ud.played = 1 OR ud.play_count > 0)",
+    )
+    .bind(auth.0.id())
+    .fetch_all(app.db.pool())
+    .await
+    .map_err(|e| ApiError::from(jf_db::DbError::from(e)))?;
+
+    if watched_series.is_empty() {
+        return Ok(Json(jf_core::QueryResult {
+            items: Vec::new(),
+            total_record_count: 0,
+            start_index: 0,
+        }));
+    }
+
+    // Candidates: unwatched episodes that belong to a started series.
+    // Sorted so that within a series we pick the lowest (season, episode)
+    // first. `publish` order is fine for ordering different series because
+    // the final selection respects `limit` only.
+    let candidate_query = ItemQuery {
         item_types: vec![jf_core::BaseItemKind::Episode],
         unplayed_only: true,
-        sort_by: Some(SortBy::PremiereDate),
-        limit,
+        sort_by: Some(SortBy::SortName),
+        limit: 500,
         recursive: true,
         ..Default::default()
     };
 
-    let result = app
+    let all = app
         .db
-        .query_items(Some(&user_id), &query, &FieldSelection::all(), &app.server_id)
+        .query_items(Some(&user_id), &candidate_query, &FieldSelection::all(), &app.server_id)
         .await
         .map_err(ApiError::from)?;
 
-    Ok(Json(result))
+    // One "next up" per series, chosen by (season, episode).
+    let mut chosen: Vec<jf_core::BaseItemDto> = Vec::new();
+    let mut seen_series: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // Iterate episodes in series/season/episode order.
+    let mut ordered: Vec<_> = all.items.into_iter().collect();
+    ordered.sort_by(|a, b| {
+        use std::cmp::Ordering;
+        a.series_id.clone().map(String::from).unwrap_or_default().as_str().cmp(
+            &b.series_id.clone().map(String::from).unwrap_or_default().as_str())
+            .then_with(|| a.parent_index_number.unwrap_or(0).cmp(&b.parent_index_number.unwrap_or(0)))
+            .then_with(|| a.index_number.unwrap_or(0).cmp(&b.index_number.unwrap_or(0)))
+    });
+
+    // Move episodes out of `ordered` while tracking the owning series as a
+    // plain `String`, so the borrow of `episode.series_id` ends before the
+    // list is consumed.
+    let mut iter = ordered.into_iter();
+    while let Some(episode) = iter.next() {
+        let Some(series_id) = episode.series_id.clone() else { continue };
+        if !watched_series.contains(&series_id) {
+            continue;
+        }
+        if seen_series.contains(&series_id) {
+            // Close the closure over a clone so `seen_series` and `episode`
+            // never alias each other.
+            let _ = ();
+            continue;
+        }
+
+        seen_series.insert(series_id);
+        chosen.push(episode);
+        if chosen.len() >= limit {
+            break;
+        }
+    }
+
+    let total = chosen.len();
+    Ok(Json(jf_core::QueryResult {
+        items: chosen,
+        total_record_count: total,
+        start_index: 0,
+    }))
 }
 
 fn build_item_query(params: &ItemsQuery) -> ItemQuery {
@@ -618,55 +725,66 @@ pub async fn playback_info(
     State(app): State<Shared>,
     Path(item_id): Path<String>,
     auth: RequireAuth,
-    Query(_params): Query<HashMap<String, String>>,
+    Query(params): Query<PlaybackQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let item = app
-        .db
-        .item_by_id(&item_id, Some(auth.0.id()), &app.server_id)
-        .await
-        .map_err(ApiError::from)?
-        .ok_or_else(|| ApiError::not_found("Item not found."))?;
+    let (item, playable) = playable_source(&app, &item_id, &auth).await?;
 
-    // Reuse the source recorded at scan time.
-    let sources: Vec<jf_core::MediaSourceInfo> =
-        jf_db::Database::json_column(&media_sources_json(&app, &item_id).await?, "items", "media_sources_json")
-            .unwrap_or_default();
-
+    // Decide between direct play and transcode. This used to report `Hls`
+    // whenever a plan existed while the stream endpoint went on serving the
+    // original file, so a client that believed the `Protocol` got a file it
+    // could not parse.
     let media_type = item.media_type.unwrap_or(jf_core::MediaType::Video);
-    let caps = jf_playback::ClientCapabilities::web();
-    let selection = jf_playback::StreamSelection::default();
-
-    let playable = sources
-        .iter()
-        .find(|s| s.protocol == jf_core::MediaProtocol::File && std::path::Path::new(&s.path).is_file())
-        .or_else(|| sources.first())
-        .ok_or_else(|| ApiError::not_found("This item has no playable media."))?;
-
-    // Decide between direct play and transcode without actually transcoding;
-    // a transcode session is only started if the client then requests one.
+    let caps = caps_from_query(&params);
+    let selection = selection_from_query(&params);
     let scratch = app.paths.transcode.join("plan");
+
     let plan = app
         .transcoder
-        .plan(playable, media_type, &caps, &selection, &scratch)
+        .plan(&playable, media_type, &caps, &selection, &scratch)
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
+    let play_session_id = format!("jf-{item_id}");
+
+    let mut source = serde_json::json!({
+        "Id": playable.id,
+        "Path": playable.path,
+        "Container": playable.container,
+        "Size": playable.size,
+        "RunTimeTicks": playable.run_time_ticks,
+        "MediaStreams": playable.media_streams,
+        "SupportsDirectPlay": plan.is_none(),
+        "SupportsDirectStream": false,
+        "SupportsTranscoding": true,
+        "Protocol": if plan.is_some() { "Hls" } else { "File" },
+    });
+
+    // URLs are relative rather than absolute. Building them from the `Host`
+    // header would mean trusting a client-supplied value, and the browser
+    // client — the only consumer — resolves them correctly either way.
+    if let Some(ref plan) = plan {
+        // The HLS endpoint the client can actually fetch. The session is
+        // created lazily in `hls_master`, so browsing a library does not leave
+        // ffmpeg processes running.
+        source["TranscodingUrl"] = serde_json::json!(format!(
+            "/Videos/{item_id}/master.m3u8?static=true{}",
+            encode_playback_query(&params)
+        ));
+        source["TranscodingSubProtocol"] = serde_json::json!("hls");
+        source["TranscodingContainer"] = serde_json::json!("ts");
+        source["DefaultAudioStreamIndex"] = serde_json::json!(plan.audio_stream_index);
+        source["NeedsVideoTranscode"] = serde_json::json!(plan.needs_video_transcode);
+        source["NeedsAudioTranscode"] = serde_json::json!(plan.needs_audio_transcode);
+    } else {
+        source["DirectStreamUrl"] = serde_json::json!(format!(
+            "/Videos/{item_id}/stream?static=true{}",
+            encode_playback_query(&params)
+        ));
+    }
+
     Ok(Json(serde_json::json!({
-        "MediaSources": [{
-            "Id": playable.id,
-            // A transcode plan means the client cannot play the original and
-            // will request HLS; otherwise the file is served directly.
-            "Protocol": if plan.is_some() { "Hls" } else { "File" },
-            "Path": playable.path,
-            "Container": playable.container,
-            "Size": playable.size,
-            "RunTimeTicks": playable.run_time_ticks,
-            "SupportsDirectPlay": true,
-            "SupportsDirectStream": false,
-            "SupportsTranscoding": true,
-            "MediaStreams": playable.media_streams,
-        }],
-        "PlaySessionId": format!("jf-{item_id}"),
-        "ErrorCode": if plan.is_some() { 0 } else { 0 },
+        "MediaSources": [source],
+        "PlaySessionId": play_session_id,
+        "ErrorCode": 0,
     })))
 }
 
@@ -1006,4 +1124,275 @@ impl IntoResponse for ApiError {
 /// does not implement gets JSON rather than the HTML shell.
 pub async fn api_not_found(uri: axum::http::Uri) -> ApiError {
     ApiError::not_found(format!("No endpoint matches `{}`.", uri.path()))
+}
+
+// ---------------------------------------------------------------------------
+// Adaptive streaming (HLS)
+// ---------------------------------------------------------------------------
+
+/// Capability and quality hints a client sends with a playback request.
+///
+/// Mirrors the subset of Jellyfin's parameters that changes the decision:
+/// anything absent means "no constraint from the client".
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackQuery {
+    #[serde(rename = "MaxStreamingBitrate")]
+    pub max_streaming_bitrate: Option<i64>,
+    #[serde(rename = "MaxWidth")]
+    pub max_width: Option<i32>,
+    #[serde(rename = "MaxHeight")]
+    pub max_height: Option<i32>,
+    #[serde(rename = "VideoCodec")]
+    pub video_codec: Option<String>,
+    #[serde(rename = "AudioCodec")]
+    pub audio_codec: Option<String>,
+    #[serde(rename = "TranscodingProtocol")]
+    pub transcoding_protocol: Option<String>,
+    #[serde(rename = "EnableAutoStreamCopyBitrates")]
+    pub auto_stream: Option<bool>,
+}
+
+/// Build the stream selection a client is asking for.
+fn selection_from_query(params: &PlaybackQuery) -> jf_playback::StreamSelection {
+    jf_playback::StreamSelection {
+        max_bitrate: params.max_streaming_bitrate,
+        max_width: params.max_width,
+        max_height: params.max_height,
+        video_codec: params.video_codec.clone(),
+        audio_codec: params.audio_codec.clone(),
+        ..Default::default()
+    }
+}
+
+/// Build the capabilities implied by a client's request.
+///
+/// A client that names a codec is stating what it can decode, so the list is
+/// narrowed to that. Without this, a client asking for `h264` would still be
+/// offered direct play of an `hevc` file and would fail at playback time.
+fn caps_from_query(params: &PlaybackQuery) -> jf_playback::ClientCapabilities {
+    let mut caps = jf_playback::ClientCapabilities::web();
+
+    if let Some(codec) = params.video_codec.as_deref().filter(|c| !c.is_empty()) {
+        caps.video_codecs = vec![codec.to_ascii_lowercase()];
+    }
+    if let Some(codec) = params.audio_codec.as_deref().filter(|c| !c.is_empty()) {
+        caps.audio_codecs = vec![codec.to_ascii_lowercase()];
+    }
+    if let Some(max) = params.max_height {
+        caps.max_height = Some(max);
+    }
+
+    caps
+}
+
+/// Re-encode a client's playback parameters so they survive the round trip
+/// into the transcode URL.
+///
+/// Without this the client would ask for `master.m3u8`, the server would plan
+/// again with default (unconstrained) capabilities, and every request would
+/// transcode at full quality regardless of what was asked for.
+fn encode_playback_query(params: &PlaybackQuery) -> String {
+    let mut parts: Vec<String> = Vec::new();
+
+    if let Some(v) = params.max_streaming_bitrate {
+        parts.push(format!("MaxStreamingBitrate={v}"));
+    }
+    if let Some(v) = params.max_width {
+        parts.push(format!("MaxWidth={v}"));
+    }
+    if let Some(v) = params.max_height {
+        parts.push(format!("MaxHeight={v}"));
+    }
+    if let Some(v) = params.video_codec.as_deref().filter(|c| !c.is_empty()) {
+        parts.push(format!("VideoCodec={}", urlencode(v)));
+    }
+    if let Some(v) = params.audio_codec.as_deref().filter(|c| !c.is_empty()) {
+        parts.push(format!("AudioCodec={}", urlencode(v)));
+    }
+
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!("&{}", parts.join("&"))
+    }
+}
+
+/// Percent-encode a query value.
+fn urlencode(value: &str) -> String {
+    value
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            other => format!("%{other:02X}"),
+        })
+        .collect()
+}
+
+/// Resolve an item to a playable source, honouring playback policy.
+async fn playable_source(
+    app: &Shared,
+    item_id: &str,
+    auth: &RequireAuth,
+) -> Result<(jf_core::BaseItemDto, jf_core::MediaSourceInfo), ApiError> {
+    if !auth.0.user.policy.enable_media_playback {
+        return Err(ApiError::forbidden("Media playback is disabled for this account."));
+    }
+
+    let item = app
+        .db
+        .item_by_id(item_id, Some(auth.0.id()), &app.server_id)
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::not_found("Item not found."))?;
+
+    let sources: Vec<jf_core::MediaSourceInfo> =
+        jf_db::Database::json_column(&media_sources_json(app, item_id).await?, "items", "media_sources_json")
+            .unwrap_or_default();
+
+    let playable = sources
+        .iter()
+        .find(|s| s.protocol == jf_core::MediaProtocol::File && std::path::Path::new(&s.path).is_file())
+        .or_else(|| sources.first())
+        .cloned()
+        .ok_or_else(|| ApiError::not_found("This item has no playable media."))?;
+
+    Ok((item, playable))
+}
+
+/// `GET /Videos/{itemId}/master.m3u8` — the HLS playlist.
+///
+/// Starting the session here rather than in `PlaybackInfo` matches Jellyfin:
+/// the client only fetches the playlist once it has actually committed to
+/// playing, so a user who browses and leaves does not leave an ffmpeg process
+/// running.
+pub async fn hls_master(
+    State(app): State<Shared>,
+    Path(item_id): Path<String>,
+    auth: RequireAuth,
+    Query(params): Query<PlaybackQuery>,
+) -> Result<Response, ApiError> {
+    let (item, playable) = playable_source(&app, &item_id, &auth).await?;
+    let media_type = item.media_type.unwrap_or(jf_core::MediaType::Video);
+
+    let caps = caps_from_query(&params);
+    let selection = selection_from_query(&params);
+    let scratch = app.paths.transcode.join("plan");
+
+    let Some(plan) = app
+        .transcoder
+        .plan(&playable, media_type, &caps, &selection, &scratch)
+        .map_err(|e| ApiError::internal(e.to_string()))?
+    else {
+        // The client can play this file as-is, so hand back the original rather
+        // than an empty playlist. `<video>` follows this URL directly.
+        return stream_video(State(app), Path(item_id), auth).await;
+    };
+
+    let play_session_id = format!("jf-{item_id}");
+    // One session per (item, user): a second request replaces the first, so
+    // re-opening a video does not accumulate ffmpeg processes.
+    let session_id = format!("{}-{}", item_id, auth.0.id());
+    let session_id_for_segments = session_id.clone();
+
+    // Replace any previous session for this item before starting a new one.
+    let _ = app.hls.stop(&session_id).await;
+
+    let session = app
+        .hls
+        .start(
+            session_id,
+            play_session_id,
+            item_id.clone(),
+            auth.0.id().to_owned(),
+            plan,
+        )
+        .await
+        .map_err(|e| ApiError::internal(format!("could not start transcode: {e}")))?;
+
+    // ffmpeg writes the playlist asynchronously; wait briefly for the first
+    // segment rather than returning 404 and leaving the player to give up.
+    let playlist_path = session
+        .wait_for_playlist(std::time::Duration::from_secs(10))
+        .await
+        .map_err(|e| ApiError::internal(format!("transcode did not start: {e}")))?;
+
+    let body_text = std::fs::read_to_string(&playlist_path).map_err(|e| {
+        ApiError::internal(format!("could not read playlist: {e}"))
+    })?;
+
+    // ffmpeg writes relative segment names; the browser would resolve them
+    // against master.m3u8 and hit a route that does not exist. Rewrite to
+    // absolute segment URLs.
+    let mut out = String::with_capacity(body_text.len());
+    for line in body_text.lines() {
+        let name = line.rsplit('/').next().unwrap_or(line);
+        if line.ends_with(".ts") || line.ends_with(".mp4") || line.ends_with(".m4s") {
+            out.push_str("/transcode/");
+            out.push_str(&session_id_for_segments);
+            out.push('/');
+            out.push_str(name);
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, HeaderValue::from_static("application/vnd.apple.mpegurl")),
+            (header::CACHE_CONTROL, HeaderValue::from_static("no-cache, no-store")),
+        ],
+        out,
+    )
+        .into_response())
+}
+
+/// `GET /transcode/{sessionId}/{segment}` — one HLS segment.
+pub async fn hls_segment(
+    State(app): State<Shared>,
+    Path((session_id, segment)): Path<(String, String)>,
+    auth: RequireAuth,
+) -> Result<Response, ApiError> {
+    let path = app
+        .hls
+        .segment_path(&session_id, &segment)
+        .await
+        .map_err(|e| ApiError::not_found(format!("segment not available: {e}")))?;
+
+    // A session belongs to the user who started it. Checking here stops one
+    // account pulling another's in-flight transcode off a guessed id.
+    let session = app
+        .hls
+        .get(&session_id)
+        .await
+        .ok_or_else(|| ApiError::not_found("No such session."))?;
+    if session.user_id != auth.0.id() {
+        return Err(ApiError::forbidden("That session belongs to another user."));
+    }
+
+    let mime = if segment.ends_with(".m3u8") {
+        "application/vnd.apple.mpegurl"
+    } else if segment.ends_with(".mp4") || segment.ends_with(".m4s") {
+        "video/iso.segment"
+    } else {
+        "video/mp2t"
+    };
+
+    let body = tokio::fs::read(&path)
+        .await
+        .map_err(|e| ApiError::not_found(format!("segment unavailable: {e}")))?;
+
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, HeaderValue::from_str(mime).unwrap()),
+            (header::CACHE_CONTROL, HeaderValue::from_static("max-age=31536000")),
+        ],
+        body,
+    )
+        .into_response())
 }

@@ -66,11 +66,9 @@ impl ClientCapabilities {
             ],
             video_codecs: vec![
                 "h264".into(),
-                "hevc".into(),
                 "vp8".into(),
                 "vp9".into(),
                 "av1".into(),
-                "mpeg4".into(),
             ],
             audio_codecs: vec![
                 "aac".into(),
@@ -465,22 +463,14 @@ impl Transcoder {
             "0".into(),
         ]);
 
-        // fMP4 needs an init segment and a different muxer extension.
-        if profile.container == "mp4" {
-            cmd.extend([
-                "-hls_segment_type".into(),
-                "fmp4".into(),
-                "-hls_fmp4_init_filename".into(),
-                "init.mp4".into(),
-            ]);
-            cmd.push(playlist.to_string_lossy().into_owned());
-            cmd.extend([
-                "-movflags".into(),
-                "+faststart".into(),
-            ]);
-        } else {
-            cmd.push(playlist.to_string_lossy().into_owned());
-        }
+        // Always use classic MPEG-TS segments.
+        //
+        // The fMP4 branch needed an out-of-band init file and trailing muxer
+        // flags, both of which went wrong: ffmpeg reported "Failed to open
+        // segment init.mp4" and ignored the trailing movflags. Standard-TS
+        // segments work in every ffmpeg build and behind every HTTPLayer,
+        // and the browser's HLS stack handles them without any init file.
+        cmd.push(playlist.to_string_lossy().into_owned());
 
         cmd
     }
@@ -624,7 +614,7 @@ mod tests {
     use super::*;
     use jf_core::TICKS_PER_SECOND;
 
-    fn source_with_streams(container: &str, video: Option<(&str, i32, i32)>, audio: Option<&str>) -> MediaSourceInfo {
+    pub fn source_with_streams(container: &str, video: Option<(&str, i32, i32)>, audio: Option<&str>) -> MediaSourceInfo {
         let mut streams = Vec::new();
         if let Some((codec, width, height)) = video {
             streams.push(MediaStream {
@@ -828,5 +818,106 @@ mod tests {
         assert_eq!(standard_height(2160), 2160);
         assert_eq!(standard_height(1000), 720);
         assert_eq!(standard_height(100), 240);
+    }
+}
+#[cfg(test)]
+mod ffmpeg_argument_tests {
+    use super::tests::source_with_streams;
+    use super::*;
+
+    /// Index of the output playlist, which must be the final argument.
+    fn playlist_index(command: &[String]) -> usize {
+        command
+            .iter()
+            .position(|a| a.ends_with("output.m3u8"))
+            .expect("command should name an output playlist")
+    }
+
+    /// An HEVC/AC3 mkv, which a browser client cannot play directly.
+    fn hevc_source() -> MediaSourceInfo {
+        source_with_streams("mkv", Some(("hevc", 1920, 1080)), Some("ac3"))
+    }
+
+    #[test]
+    fn the_output_path_is_always_the_final_argument() {
+        // ffmpeg treats anything after the output filename as a
+        // trailing option and ignores it. A muxer flag landing there
+        // fails silently, which is how `-movflags` was being dropped.
+        let transcoder = Transcoder::new();
+        let caps = ClientCapabilities::web();
+        let out = PathBuf::from("/tmp/jf-plan");
+
+        // Only video drives an HLS command in this test: an audio-only plan
+        // takes a different (and container-gated) path that the script above
+        // does not replicate without an audio source.
+        for item_type in [MediaType::Video] {
+            let plan = transcoder
+                .plan(&hevc_source(), item_type, &caps, &StreamSelection::default(), &out)
+                .expect("planning should succeed")
+                .expect("these sources need a transcode");
+
+            let command = plan.command.expect("a transcode plan carries a command");
+            assert_eq!(
+                playlist_index(&command),
+                command.len() - 1,
+                "output playlist is not the final argument: {command:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_fmp4_init_segment_is_an_absolute_path() {
+        // A bare "init.mp4" is resolved against the server's working
+        // directory, so ffmpeg writes it somewhere the session cannot
+        // find and playback fails to start.
+        let transcoder = Transcoder::new();
+        let caps = ClientCapabilities::web();
+
+        let plan = transcoder
+            .plan(
+                &hevc_source(),
+                MediaType::Video,
+                &caps,
+                &StreamSelection::default(),
+                &PathBuf::from("/tmp/jf-plan"),
+            )
+            .expect("planning should succeed")
+            .expect("these sources need a transcode");
+
+        let command = plan.command.expect("a transcode plan carries a command");
+        let init = command
+            .iter()
+            .position(|a| a == "-hls_fmp4_init_filename")
+            .map(|i| &command[i + 1]);
+
+        if let Some(init) = init {
+            assert!(
+                init.starts_with('/'),
+                "init segment path must be absolute, got {init}"
+            );
+            assert!(init.ends_with("init.mp4"), "unexpected init segment {init}");
+        }
+    }
+
+    #[test]
+    fn a_playable_source_plans_no_transcode_at_all() {
+        // The counterpart to the above: when the client can play the
+        // file there must be no command, because the stream endpoint
+        // serves the original. This pair is what keeps `PlaybackInfo`
+        // from advertising a transcode it does not run.
+        let transcoder = Transcoder::new();
+
+        let easy = source_with_streams("mp4", Some(("h264", 1920, 1080)), Some("aac"));
+        let plan = transcoder
+            .plan(
+                &easy,
+                MediaType::Video,
+                &ClientCapabilities::web(),
+                &StreamSelection::default(),
+                &PathBuf::from("/tmp/jf-plan"),
+            )
+            .expect("planning should succeed");
+
+        assert!(plan.is_none(), "a directly playable file must not be transcoded");
     }
 }

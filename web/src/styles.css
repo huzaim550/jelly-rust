@@ -947,6 +947,21 @@ button.link.danger {
   overflow: hidden;
 }
 
+/* "128 files" — right-aligned so the digits do not jitter as they climb. */
+.scan-list .scan-count {
+  min-width: 64px;
+  text-align: right;
+}
+
+/* The file currently being committed; ellipsised because paths run long. */
+.scan-list .scan-current {
+  flex: 0 0 auto;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .bar.slim {
   height: 4px;
   margin-top: 6px;

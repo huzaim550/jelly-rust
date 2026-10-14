@@ -60,12 +60,17 @@ export function LibrarySettings({ go }: { go: (route: Route) => void }) {
                 <div className="name">{folder.Name}</div>
                 <div className="muted small path">{folder.Locations.join(", ")}</div>
                 {status?.state === "Scanning" && (
-                  <div className="bar slim">
-                    <div
-                      className="fill"
-                      style={{ width: `${Math.round((status.progress ?? 0) * 100)}%` }}
-                    />
-                  </div>
+                  <>
+                    <div className="bar slim">
+                      <div
+                        className="fill"
+                        style={{ width: `${Math.round((status.progress ?? 0) * 100)}%` }}
+                      />
+                    </div>
+                    <div className="muted small">
+                      {Math.round((status.progress ?? 0) * 100)}% · {status.processed} files
+                    </div>
+                  </>
                 )}
                 {status?.detail && <div className="muted small">{status.detail}</div>}
               </div>

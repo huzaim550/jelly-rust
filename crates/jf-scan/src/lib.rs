@@ -36,6 +36,16 @@ pub struct LibraryConfig {
     pub collection_type: String,
 }
 
+/// Coarse progress, emitted once per file during a scan.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScanProgress {
+    pub library_id: String,
+    pub processed: usize,
+    pub total: usize,
+    pub fraction: f64,
+    pub path: String,
+}
+
 /// Aggregated counters for a scan run.
 #[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct ScanReport {
@@ -115,13 +125,17 @@ impl Scanner {
     pub async fn scan_all(&self) -> DbResult<Vec<ScanReport>> {
         let mut reports = Vec::new();
         for lib in self.libraries().await? {
-            reports.push(self.scan_library(&lib).await?);
+            reports.push(self.scan_library(&lib, None).await?);
         }
         Ok(reports)
     }
 
     /// Scan one library: discover files, probe them, and reconcile the tree.
-    pub async fn scan_library(&self, lib: &LibraryConfig) -> DbResult<ScanReport> {
+    pub async fn scan_library(
+        &self,
+        lib: &LibraryConfig,
+        mut progress: Option<&mut (dyn FnMut(ScanProgress) + Send)>,
+    ) -> DbResult<ScanReport> {
         let mut report = ScanReport { library_id: lib.id.clone(), ..Default::default() };
 
         if !lib.path.is_dir() {
@@ -149,9 +163,23 @@ impl Scanner {
         let parser = NameParser::new();
         let mut seen_paths: Vec<String> = Vec::with_capacity(entries.len());
 
-        for (path, probe) in probes {
+        for (i, (path, probe)) in probes.iter().enumerate() {
             let path_str = path.to_string_lossy().to_string();
             seen_paths.push(path_str.clone());
+
+            // Report before persisting, so a slow parser does not look like
+            // the scan has stalled on the UI.
+            if let Some(cb) = progress.as_mut() {
+                let processed = i + 1;
+                let total = probes.len();
+                cb(ScanProgress {
+                    library_id: lib.id.clone(),
+                    processed,
+                    total,
+                    fraction: if total == 0 { 1.0 } else { processed as f64 / total as f64 },
+                    path: path_str.clone(),
+                });
+            }
 
             if probe.is_none() {
                 // Not a container ffprobe understands; still track it so a
@@ -552,4 +580,124 @@ pub fn image_tag(path: &Path) -> String {
         hasher.update(t.as_nanos().to_le_bytes());
     }
     hex::encode(hasher.finalize())[..32].to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+
+    /// Encode a one-second clip of real media, for tests that need the scanner
+    /// to actually index something rather than skip it.
+    ///
+    /// Returns `None` when ffmpeg is unavailable, so tests can bail out instead
+    /// of failing on a machine without it.
+    fn real_media_fixture(dir: &Path, name: &str) -> Option<std::path::PathBuf> {
+        if Command::new("ffmpeg").arg("-version").output().is_err() {
+            return None;
+        }
+
+        let file = dir.join(name);
+        let ok = Command::new("ffmpeg")
+            .args(["-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-c:a", "aac"])
+            .arg(&file)
+            .output()
+            .map(|s| s.status.success())
+            .unwrap_or(false);
+
+        if !ok {
+            return None;
+        }
+        Some(file)
+    }
+
+    /// Progress must be reported once per file, with monotonically increasing
+    /// counters, so the dashboard percentage climbs instead of jumping from
+    /// 0 straight to 100 when the scan finally finishes.
+    #[tokio::test]
+    async fn scan_reports_progress_for_every_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+
+        // Four separately-named but identical movies. Real bytes are required:
+        // the scanner skips files ffprobe cannot open, so dummy `.mkv` files
+        // would never reach the progress callback with an item to add.
+        let source = match real_media_fixture(dir.path(), "source.mkv") {
+            Some(p) => p,
+            None => {
+                eprintln!("skipped: ffmpeg unavailable");
+                return;
+            }
+        };
+        for i in 1..=4 {
+            std::fs::copy(&source, dir.path().join(format!("Film {i:02} (2001).mkv")))
+                .expect("copy fixture");
+        }
+        let _ = std::fs::remove_file(&source);
+
+        let db = Database::connect_memory().await.expect("memory db");
+        let scanner = Scanner::new(db);
+
+        let mut cfg = LibraryConfig {
+            id: String::new(),
+            name: "Movies".into(),
+            path: dir.path().to_path_buf(),
+            collection_type: "movies".into(),
+        };
+        cfg.id = scanner.add_library(&cfg).await.expect("add library");
+
+        let mut seen: Vec<ScanProgress> = Vec::new();
+        let report = scanner
+            .scan_library(&cfg, Some(&mut |p| seen.push(p)))
+            .await
+            .expect("scan");
+
+        assert_eq!(report.added, 4, "every fixture should be indexed; {report:?}");
+        assert_eq!(report.skipped, 0, "none should be unprobeable");
+        assert_eq!(seen.len(), 4, "one callback per file");
+
+        let processed: Vec<usize> = seen.iter().map(|p| p.processed).collect();
+        assert_eq!(processed, vec![1, 2, 3, 4], "counters are 1-based and climb");
+
+        assert!(seen.iter().all(|p| p.total == 4), "total is known up front");
+
+        let fractions: Vec<f64> = seen.iter().map(|p| p.fraction).collect();
+        assert!(
+            fractions.windows(2).all(|w| w[0] < w[1]),
+            "fraction must strictly increase: {fractions:?}"
+        );
+        assert!((fractions[0] - 0.25).abs() < 1e-9);
+        assert!((fractions[3] - 1.0).abs() < 1e-9);
+
+        assert!(
+            seen.iter().all(|p| p.path.ends_with(".mkv")),
+            "the reported path is the file being handled"
+        );
+        assert_eq!(seen[0].library_id, cfg.id);
+    }
+
+    /// A scan with nothing to do still reports completion rather than never
+    /// firing the callback (the UI would sit at 0% forever).
+    #[tokio::test]
+    async fn scan_of_an_empty_library_reports_nothing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = Database::connect_memory().await.expect("memory db");
+        let scanner = Scanner::new(db);
+
+        let mut cfg = LibraryConfig {
+            id: String::new(),
+            name: "Empty".into(),
+            path: dir.path().to_path_buf(),
+            collection_type: "movies".into(),
+        };
+        cfg.id = scanner.add_library(&cfg).await.expect("add library");
+
+        let mut seen: Vec<ScanProgress> = Vec::new();
+        let report = scanner
+            .scan_library(&cfg, Some(&mut |p| seen.push(p)))
+            .await
+            .expect("scan");
+
+        assert_eq!(report.added, 0);
+        assert!(seen.is_empty());
+    }
 }

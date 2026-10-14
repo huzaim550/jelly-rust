@@ -64,6 +64,11 @@ impl Database {
     }
 
     /// Open an in-memory database. Used by tests.
+    ///
+    /// The pool must be exactly one connection: SQLite gives each `:memory:`
+    /// connection its own private database, so a second pooled connection sees
+    /// an empty schema — migrations run on one connection are invisible to the
+    /// others. `shared_cache` does not change that here.
     pub async fn connect_memory() -> Result<Self> {
         let options = SqliteConnectOptions::new()
             .in_memory(true)
@@ -71,7 +76,7 @@ impl Database {
             .foreign_keys(true);
 
         let pool = SqlitePoolOptions::new()
-            .max_connections(4)
+            .max_connections(1)
             .connect_with(options)
             .await?;
 

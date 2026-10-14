@@ -171,7 +171,10 @@ function ScanPanel({
   statuses,
 }: {
   folders: Array<{ ItemId: string; Name: string }>;
-  statuses: Record<string, { state: string; progress: number | null }>;
+  statuses: Record<
+    string,
+    { state: string; progress: number | null; processed?: number; detail?: string | null }
+  >;
 }) {
   return (
     <section>
@@ -180,17 +183,25 @@ function ScanPanel({
         {folders.map((folder) => {
           const status = statuses[folder.ItemId];
           const progress = status?.progress ?? 0;
+          const percent = Math.round(progress * 100);
           return (
             <li key={folder.ItemId}>
               <span className="name">{folder.Name}</span>
               <div className="bar">
-                <div className="fill" style={{ width: `${Math.round(progress * 100)}%` }} />
+                <div className="fill" style={{ width: `${percent}%` }} />
               </div>
               <span className="muted small">
-                {status?.state === "Scanning"
-                  ? `${Math.round(progress * 100)}%`
-                  : (status?.state ?? "Waiting")}
+                {status?.state === "Scanning" ? `${percent}%` : (status?.state ?? "Waiting")}
               </span>
+              {status?.state === "Scanning" && status.processed != null && (
+                <span className="muted small scan-count">{status.processed} files</span>
+              )}
+              {status?.state === "Scanning" && status.detail && (
+                // The server reports the file being committed right now.
+                <span className="muted small scan-current" title={status.detail}>
+                  {status.detail.split("/").pop()}
+                </span>
+              )}
             </li>
           );
         })}

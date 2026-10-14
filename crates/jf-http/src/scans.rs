@@ -14,7 +14,7 @@ use jf_scan::ScanReport;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 
 /// Where a library is in its scan.
 #[derive(Debug, Clone, Serialize)]
@@ -30,7 +30,11 @@ pub struct ScanStatus {
     pub detail: Option<String>,
 }
 
-type StatusMap = Arc<RwLock<HashMap<String, ScanStatus>>>;
+/// A plain OS mutex rather than a tokio one: the scanner reports progress
+/// from inside a blocking, synchronous callback, where `.await` is not
+/// available. Every critical section here is a map insert or a clone, so
+/// parking a task on it would be a bug anyway.
+type StatusMap = Arc<std::sync::Mutex<HashMap<String, ScanStatus>>>;
 
 /// Tracks scan state and serializes scan runs.
 ///
@@ -50,7 +54,7 @@ impl ScanManager {
     pub fn empty() -> Self {
         Self {
             app: Arc::new(Mutex::new(None)),
-            status: Arc::new(RwLock::new(HashMap::new())),
+            status: Arc::new(std::sync::Mutex::new(HashMap::new())),
             running: Arc::new(Mutex::new(())),
         }
     }
@@ -65,7 +69,7 @@ impl ScanManager {
 
     /// Current status for every library that has been scanned this run.
     pub async fn statuses(&self) -> HashMap<String, ScanStatus> {
-        self.status.read().await.clone()
+        self.status.lock().unwrap().clone()
     }
 
     /// Whether a scan is currently running.
@@ -78,7 +82,7 @@ impl ScanManager {
 
     /// Status for one library, if known.
     pub async fn status(&self, library_id: &str) -> Option<ScanStatus> {
-        self.status.read().await.get(library_id).cloned()
+        self.status.lock().unwrap().get(library_id).cloned()
     }
 
     /// Start a scan of every library, detached from the caller.
@@ -120,8 +124,7 @@ impl ScanManager {
                         processed: 0,
                         detail: None,
                     },
-                )
-                .await;
+                );
 
                 app.emit(
                     "scanStarted",
@@ -132,7 +135,38 @@ impl ScanManager {
                     }),
                 );
 
-                match app.scanner.scan_library(library).await {
+                match app
+                    .scanner
+                    .scan_library(
+                        library,
+                        Some(&mut |progress: jf_scan::ScanProgress| {
+                            // Keep the polled status in step so the dashboard
+                            // percentage climbs file by file, and push the same
+                            // number over SSE for clients that listen live.
+                            set_status(
+                                &status,
+                                &library.id,
+                                ScanStatus {
+                                    state: "Scanning".into(),
+                                    progress: Some(progress.fraction),
+                                    processed: progress.processed,
+                                    detail: Some(progress.path.clone()),
+                                },
+                            );
+                            app.emit(
+                                "scanProgress",
+                                serde_json::json!({
+                                    "libraryId": progress.library_id,
+                                    "processed": progress.processed,
+                                    "total": progress.total,
+                                    "fraction": progress.fraction,
+                                    "path": progress.path,
+                                }),
+                            );
+                        }),
+                    )
+                    .await
+                {
                     Ok(report) => {
                         let detail = describe(&report);
                         tracing::info!(library = %library.name, %detail, "scan finished");
@@ -146,8 +180,7 @@ impl ScanManager {
                                 processed: report.added + report.updated,
                                 detail: Some(detail),
                             },
-                        )
-                        .await;
+                        );
 
                         app.emit(
                             "scanComplete",
@@ -180,8 +213,7 @@ impl ScanManager {
                                 processed: 0,
                                 detail: Some(e.to_string()),
                             },
-                        )
-                        .await;
+                        );
 
                         app.emit(
                             "scanFailed",
@@ -221,12 +253,11 @@ fn describe(report: &ScanReport) -> String {
     }
 }
 
-async fn set_status(
-    status: &StatusMap,
-    library_id: &str,
-    value: ScanStatus,
-) {
-    status.write().await.insert(library_id.to_owned(), value);
+fn set_status(status: &StatusMap, library_id: &str, value: ScanStatus) {
+    status
+        .lock()
+        .unwrap()
+        .insert(library_id.to_owned(), value);
 }
 
 #[cfg(test)]

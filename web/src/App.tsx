@@ -41,6 +41,9 @@ export function useSession(): AppContextValue {
 export function App() {
   const [status, setStatus] = useState<Status>("loading");
   const [session, setSession] = useState<Session | null>(null);
+  // Kept separately from `session`: the server name is public and the login
+  // page needs it before anyone has signed in.
+  const [server, setServer] = useState<PublicSystemInfo | null>(null);
   const [error, setError] = useState("");
   const [route, go] = useRoute();
   const [playing, setPlaying] = useState<{ itemId: string; title: string } | null>(null);
@@ -50,8 +53,10 @@ export function App() {
 
     (async () => {
       try {
-        const server = await api.publicInfo();
+        const info = await api.publicInfo();
         if (cancelled) return;
+        setServer(info);
+        const server = info;
 
         if (await api.restore()) {
           const user = await api.me();
@@ -146,7 +151,7 @@ export function App() {
   if (status === "unauthenticated" || !session) {
     return (
       <AppContext.Provider value={context}>
-        <Login serverName={session?.server.ServerName ?? "jellyfin-clone"} />
+        <Login serverName={server?.ServerName ?? "jellyfin-clone"} />
       </AppContext.Provider>
     );
   }

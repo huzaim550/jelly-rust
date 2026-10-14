@@ -16,8 +16,44 @@ import type {
 } from "../types";
 
 const TOKEN_KEY = "jf.token";
+const DEVICE_KEY = "jf.device";
 
-let token: string | null = localStorage.getItem(TOKEN_KEY);
+/**
+ * `localStorage`, but never throwing.
+ *
+ * Firefox private browsing and Safari's restricted mode throw on *accessing*
+ * the object at all, not just on writing. Since this module reads storage at
+ * import time, an unguarded access white-screens the whole app in those
+ * browsers. Falling back to an in-memory map keeps the session alive for the
+ * page's lifetime, which is the best that can be done without persistence.
+ */
+const memoryStore = new Map<string, string>();
+
+const store: {
+  get(key: string): string | null;
+  set(key: string, value: string): void;
+  remove(key: string): void;
+} = (() => {
+  try {
+    const probe = "__jf_probe__";
+    window.localStorage.setItem(probe, "1");
+    window.localStorage.removeItem(probe);
+
+    return {
+      get: (key) => window.localStorage.getItem(key),
+      set: (key, value) => window.localStorage.setItem(key, value),
+      remove: (key) => window.localStorage.removeItem(key),
+    };
+  } catch {
+    return {
+      get: (key) => memoryStore.get(key) ?? null,
+      set: (key, value) => void memoryStore.set(key, value),
+      remove: (key) => void memoryStore.delete(key),
+    };
+  }
+})();
+
+let token: string | null = store.get(TOKEN_KEY);
 
 /** Why a request failed, with enough detail to show something useful. */
 export class ApiError extends Error {
@@ -39,8 +75,8 @@ export class ApiError extends Error {
 
 function setToken(next: string | null): void {
   token = next;
-  if (next) localStorage.setItem(TOKEN_KEY, next);
-  else localStorage.removeItem(TOKEN_KEY);
+  if (next) store.set(TOKEN_KEY, next);
+  else store.remove(TOKEN_KEY);
 }
 
 function buildQuery(params: Record<string, unknown>): string {
@@ -103,11 +139,15 @@ async function request<T>(
 
 /** A stable per-browser device id, so sessions are distinguishable. */
 function deviceId(): string {
-  const KEY = "jf.device";
-  let id = localStorage.getItem(KEY);
+  let id = store.get(DEVICE_KEY);
   if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(KEY, id);
+    // `crypto.randomUUID` needs a secure context, which a LAN-served http://
+    // origin is not. Fall back so the client still works on a home network.
+    id =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `jf-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+    store.set(DEVICE_KEY, id);
   }
   return id;
 }
@@ -149,9 +189,18 @@ export const api = {
     setToken(null);
   },
 
-  /** Re-adopt a stored token. Returns false if the server rejects it. */
+  /**
+   * Re-adopt a stored token. Returns false if the server rejects it.
+   *
+   * Re-reads storage rather than trusting the module-level `token`, which was
+   * captured when this module was first imported. A token written afterwards —
+   * by a sign-in in another tab, or by a test priming storage — would otherwise
+   * be invisible and the user would be silently signed out.
+   */
   async restore(): Promise<boolean> {
+    setToken(store.get(TOKEN_KEY));
     if (!token) return false;
+
     try {
       await request("GET", "/Users/Me");
       return true;
@@ -198,6 +247,25 @@ export const api = {
         Limit: limit,
         Recursive: "true",
         Fields: "Overview,ProductionYear,RunTimeTicks,UserData",
+      },
+    });
+  },
+
+  /**
+   * Most recently added items.
+   *
+   * A sorted items query rather than a dedicated endpoint: the server already
+   * supports `DateCreated` ordering, and a new route would be a second thing to
+   * keep in step with the item query's filtering.
+   */
+  latest(userId: string, limit = 20): Promise<QueryResult<BaseItem>> {
+    return request("GET", `/Users/${userId}/Items`, {
+      params: {
+        Limit: limit,
+        Recursive: "true",
+        SortBy: "DateCreated",
+        SortOrder: "Descending",
+        Fields: "Overview,ProductionYear,RunTimeTicks,UserData,DateCreated",
       },
     });
   },

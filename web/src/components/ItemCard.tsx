@@ -43,6 +43,25 @@ export function itemSubtitle(item: BaseItem): string {
   return parts.join(" · ");
 }
 
+/**
+ * Time left in a partially-watched item, or null if it has not been started.
+ *
+ * Jellyfin labels resume tiles with what is *remaining*, not what has been
+ * watched: a 6-hour film an hour in reads as "5h left", which is what decides
+ * whether it is worth resuming now.
+ */
+export function formatRemaining(item: BaseItem): string | null {
+  const position = item.UserData?.PlaybackPositionTicks ?? 0;
+  const runtime = item.RunTimeTicks ?? 0;
+  if (!runtime || position <= 0) return null;
+
+  const left = runtime - position;
+  // Past the 98% mark the server treats it as finished; nothing to resume.
+  if (left <= runtime * 0.02) return null;
+
+  return formatDuration(left);
+}
+
 /** Fraction of an item that has been watched, or 0. */
 export function resumeFraction(item: BaseItem): number {
   const position = item.UserData?.PlaybackPositionTicks ?? 0;
@@ -79,6 +98,7 @@ export function ItemCard({
 }) {
   const progress = resumeFraction(item);
   const subtitle = itemSubtitle(item);
+  const remaining = formatRemaining(item);
 
   return (
     <div className="card item">
@@ -91,6 +111,7 @@ export function ItemCard({
         {progress > 0 && progress < 0.98 && (
           <div className="progress" style={{ width: `${progress * 100}%` }} />
         )}
+        {remaining && <span className="remaining-badge">{remaining} left</span>}
       </button>
 
       {showPlayOverlay && (

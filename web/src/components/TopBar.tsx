@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSession } from "../App";
-import type { Route } from "../router";
+import { navigate } from "../router";
 
 /**
  * Persistent header: server name, search, and sign-out.
@@ -10,23 +10,20 @@ import type { Route } from "../router";
 export function TopBar() {
   const { session, logout } = useSession();
   const [term, setTerm] = useState("");
-  const [, setRoute] = useState<Route>({ name: "home" });
 
   useEffect(() => {
     const trimmed = term.trim();
     if (!trimmed) return;
 
     const timer = window.setTimeout(() => {
-      window.history.replaceState({}, "", `/search?q=${encodeURIComponent(trimmed)}`);
-      setRoute({ name: "search", term: trimmed });
+      navigate({ name: "search", term: trimmed }, true);
     }, 300);
 
     return () => window.clearTimeout(timer);
   }, [term]);
 
   function goHome() {
-    window.history.pushState({}, "", "/");
-    setRoute({ name: "home" });
+    navigate({ name: "home" });
     setTerm("");
   }
 
@@ -53,10 +50,7 @@ export function TopBar() {
         <button
           type="button"
           className="link"
-          onClick={() => {
-            window.history.pushState({}, "", "/dashboard");
-            setRoute({ name: "dashboard" });
-          }}
+          onClick={() => navigate({ name: "dashboard" })}
         >
           Dashboard
         </button>

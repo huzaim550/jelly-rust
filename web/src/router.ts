@@ -48,8 +48,10 @@ export function navigate(route: Route, replace = false): void {
   const href = hrefFor(route);
   if (replace) window.history.replaceState({}, "", href);
   else window.history.pushState({}, "", href);
-  // Dispatch so components using the hook re-read the location.
-  window.dispatchEvent(new PopStateEvent("popstate"));
+  // `useRoute` subscribes to this custom event rather than `popstate`:
+  // `replaceState` does not fire `popstate`, so relying on it left in-app
+  // navigation updating the URL without updating the screen.
+  window.dispatchEvent(new Event("jf:navigate"));
 }
 
 /**

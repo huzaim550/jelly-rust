@@ -10,7 +10,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use jf_core::dto::*;
 use jf_db::items::{FieldSelection, ItemQuery, SortBy, SortOrder};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -362,12 +362,29 @@ pub async fn resume_items(
     Ok(Json(result))
 }
 
+/// Either a single item or a page of items.
+///
+/// The two are distinguished by shape rather than by route: Jellyfin serves
+/// both from `/Users/{userId}/Items/{id}`, and registering that path twice
+/// panics the router at startup, so one handler must decide which to return.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum ItemOrListing {
+    Item(jf_core::BaseItemDto),
+    Listing(jf_core::QueryResult<jf_core::BaseItemDto>),
+}
+
 /// `GET /Users/{userId}/Items/{itemId}`
+///
+/// Returns the item itself, or — when the id names a folder — that folder's
+/// children. The client relies on this: it lists a library by requesting the
+/// library's own id, so without the folder branch every library appeared empty.
 pub async fn user_item(
     State(app): State<Shared>,
     Path((user_id, item_id)): Path<(String, String)>,
     auth: RequireAuth,
-) -> Result<Json<jf_core::BaseItemDto>, ApiError> {
+    Query(params): Query<ItemsQuery>,
+) -> Result<Json<ItemOrListing>, ApiError> {
     authorize_user(&auth.0, &user_id)?;
 
     let item = app
@@ -377,7 +394,91 @@ pub async fn user_item(
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::not_found("Item not found."))?;
 
-    Ok(Json(item))
+    if !item.is_folder {
+        return Ok(Json(ItemOrListing::Item(item)));
+    }
+
+    // Listing a folder. `recursive` defaults to true because Jellyfin clients
+    // send it explicitly but hand-rolled callers do not, and a one-level
+    // listing of a flat movie library shows nothing.
+    let fields = FieldSelection::parse(params.fields.as_deref());
+    let query = build_item_query(&ItemsQuery {
+        parent_id: Some(item_id),
+        recursive: Some(params.recursive.unwrap_or(true)),
+        ..params
+    });
+
+    let listing = app
+        .db
+        .query_items(Some(&user_id), &query, &fields, &app.server_id)
+        .await
+        .map_err(ApiError::from)?;
+
+    Ok(Json(ItemOrListing::Listing(listing)))
+}
+
+#[cfg(test)]
+mod item_or_listing_tests {
+    use super::*;
+
+    fn folder() -> jf_core::BaseItemDto {
+        // Built from the wire form on purpose: the fixture is then exactly what
+        // the server would send, so the test cannot drift from the real shape.
+        serde_json::from_value(serde_json::json!({
+            "Name": "Films",
+            "ServerId": "server-1",
+            "Id": "lib-1",
+            "Type": "CollectionFolder",
+            "IsFolder": true,
+            "Path": "/media/movies",
+            "CanDelete": false,
+            "CanDownload": true,
+            "IsLiveStream": false,
+        }))
+        .expect("folder fixture should deserialize")
+    }
+
+    fn movie() -> jf_core::BaseItemDto {
+        serde_json::from_value(serde_json::json!({
+            "Name": "Alien",
+            "ServerId": "server-1",
+            "Id": "m1",
+            "Type": "Movie",
+            "IsFolder": false,
+            "ProductionYear": 1979,
+            "Path": "/media/movies/Alien (1979).mkv",
+            "CanDelete": true,
+            "CanDownload": true,
+            "IsLiveStream": false,
+        }))
+        .expect("movie fixture should deserialize")
+    }
+
+    #[test]
+    fn a_folder_serializes_as_a_listing_and_a_movie_as_an_item() {
+        // The distinction is the whole point of this endpoint: the client tells
+        // them apart by whether an `Items` key is present.
+        let listing = serde_json::to_value(ItemOrListing::Listing(jf_core::QueryResult {
+            items: vec![movie()],
+            total_record_count: 1,
+            start_index: 0,
+        }))
+        .unwrap();
+
+        assert!(listing.get("Items").is_some(), "listing lost its Items key");
+        assert_eq!(listing["TotalRecordCount"], 1);
+
+        let item = serde_json::to_value(ItemOrListing::Item(movie())).unwrap();
+        assert!(item.get("Items").is_none(), "a movie must not look like a listing");
+        assert_eq!(item["Name"], "Alien");
+    }
+
+    #[test]
+    fn a_folder_carries_the_fields_the_client_navigates_by() {
+        let json = serde_json::to_value(ItemOrListing::Item(folder())).unwrap();
+        assert_eq!(json["Id"], "lib-1");
+        assert_eq!(json["IsFolder"], true);
+    }
 }
 
 /// `GET /Shows/{seriesId}/Seasons`

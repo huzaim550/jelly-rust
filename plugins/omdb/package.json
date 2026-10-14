@@ -1,9 +1,9 @@
 {
-  "name": "tmdb-provider",
+  "name": "omdb-provider",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "TMDB metadata provider for jellyfin-clone",
+  "description": "OMDb metadata provider for jellyfin-clone",
   "main": "dist/index.js",
   "engines": {
     "node": ">=20"

@@ -7,9 +7,8 @@
 //! * probe containers with ffprobe and extract media streams,
 //! * persist items, streams, images, and external ids.
 //!
-//! Metadata *providers* (TMDB, OMDb, ...) are not implemented here. They plug
-//! in through `jf_plugins`' `register_metadata_provider` hook, which keeps this
-//! crate free of network concerns and API keys.
+//! Metadata providers are invoked by the HTTP scan manager after filesystem
+//! indexing, keeping this crate free of network concerns and API keys.
 
 pub mod naming;
 pub mod nfo;
@@ -458,8 +457,12 @@ impl Scanner {
 
         if !is_new {
             sqlx::query(
-                "UPDATE items SET name = ?, sort_name = ?, size = ?, container = ?,
-                    date_modified = ?, production_year = ?, run_time_ticks = ?,
+                "UPDATE items SET
+                    name = CASE WHEN date_last_refreshed IS NULL THEN ? ELSE name END,
+                    sort_name = CASE WHEN date_last_refreshed IS NULL THEN ? ELSE sort_name END,
+                    size = ?, container = ?, date_modified = ?,
+                    production_year = CASE WHEN date_last_refreshed IS NULL THEN ? ELSE production_year END,
+                    run_time_ticks = ?,
                     parent_id = ?, series_id = ?, media_sources_json = ?
                  WHERE id = ?",
             )
@@ -485,7 +488,7 @@ impl Scanner {
                      parent_index_number, date_created, date_modified, date_last_refreshed,
                      genres_json, tags_json, artists_json, taglines_json, people_json,
                      media_sources_json, image_tags_json, backdrop_json, is_folder)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', '[]', '[]', '[]', ?, '{}', '[]', 0)",
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, '[]', '[]', '[]', '[]', '[]', ?, '{}', '[]', 0)",
             )
             .bind(&id)
             .bind(&lib.id)
@@ -505,7 +508,6 @@ impl Scanner {
             .bind(parsed.and_then(|p| p.episode_title.clone()))
             .bind(parsed.and_then(|p| p.episode_number()).map(|n| n as i32))
             .bind(parsed.and_then(|p| p.season_number()).map(|n| n as i32))
-            .bind(jf_db::users::now_iso())
             .bind(jf_db::users::now_iso())
             .bind(jf_db::users::now_iso())
             .bind(&media_sources)

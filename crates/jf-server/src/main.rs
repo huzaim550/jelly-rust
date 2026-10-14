@@ -160,6 +160,13 @@ async fn main() -> Result<()> {
     if args.scan_once {
         let reports = app.scanner.scan_all().await.context("scanning")?;
         for report in &reports {
+            if let Err(error) = jf_http::scans::refresh_metadata(&app, &report.library_id).await {
+                tracing::warn!(
+                    library = %report.library_id,
+                    error = %error,
+                    "OMDb metadata refresh failed after scan"
+                );
+            }
             println!(
                 "library {}: {} added, {} updated, {} removed, {} skipped, {} errors",
                 report.library_id,
@@ -235,12 +242,21 @@ async fn main() -> Result<()> {
         let executable = std::env::current_exe().context("finding server executable")?;
         let args = std::env::args_os().skip(1).collect::<Vec<_>>();
         drop(app);
-        std::process::Command::new(executable)
-            .args(args)
-            .spawn()
-            .context("starting replacement server process")?;
-        tracing::info!("replacement server process started");
-        return Ok(());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            let error = std::process::Command::new(executable).args(args).exec();
+            return Err(error).context("replacing server process");
+        }
+        #[cfg(not(unix))]
+        {
+            std::process::Command::new(executable)
+                .args(args)
+                .spawn()
+                .context("starting replacement server process")?;
+            tracing::info!("replacement server process started");
+            return Ok(());
+        }
     }
 
     println!("\nstopped");

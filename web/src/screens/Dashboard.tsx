@@ -250,7 +250,7 @@ function PluginList() {
   if (plugins.length === 0 && failed.length === 0) {
     return (
       <p className="muted">
-        No plugins installed. Put one in <code>&lt;data&gt;/plugins/</code>.
+        No plugins loaded. Check the server startup logs and <code>JF_PLUGINS_DIR</code>.
       </p>
     );
   }

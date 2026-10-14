@@ -10,8 +10,11 @@
 //!   without polling the database.
 
 use crate::state::AppState;
+use jf_core::BaseItemKind;
+use jf_plugins::{MetadataQuery, MetadataResult};
 use jf_scan::ScanReport;
 use serde::Serialize;
+use sqlx::Row;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -176,6 +179,13 @@ impl ScanManager {
                     .await
                 {
                     Ok(report) => {
+                        if let Err(error) = refresh_metadata(&app, &library.id).await {
+                            tracing::warn!(
+                                library = %library.name,
+                                error = %error,
+                                "metadata refresh failed"
+                            );
+                        }
                         let detail = describe(&report);
                         tracing::info!(library = %library.name, %detail, "scan finished");
 
@@ -238,6 +248,223 @@ impl ScanManager {
 
         Ok(())
     }
+}
+
+pub async fn refresh_metadata(app: &AppState, library_id: &str) -> anyhow::Result<usize> {
+    let report = app.plugins.report().await;
+    if !report.loaded.iter().any(|plugin| plugin.id == "omdb") {
+        return Ok(0);
+    }
+
+    let configured = app
+        .plugins
+        .plugin_config_get("omdb", "api_key")
+        .await?
+        .is_some_and(|key| !key.trim().is_empty())
+        || std::env::var("OMDB_API_KEY").is_ok_and(|key| !key.trim().is_empty());
+    if !configured {
+        return Ok(0);
+    }
+
+    let rows = sqlx::query(
+        "SELECT id, name, kind, production_year, series_name,
+                parent_index_number, index_number
+         FROM items
+         WHERE library_id = ? AND is_folder = 0 AND date_last_refreshed IS NULL
+           AND kind IN ('Movie', 'Series', 'Episode')",
+    )
+    .bind(library_id)
+    .fetch_all(app.db.pool())
+    .await?;
+
+    let mut refreshed = 0;
+    for row in rows {
+        let item_id: String = row.get("id");
+        let name: String = row.get("name");
+        let raw_kind: String = row.get("kind");
+        let series_name: Option<String> = row.get("series_name");
+        let season: Option<i32> = row.get("parent_index_number");
+        let episode: Option<i32> = row.get("index_number");
+
+        let (kind, title) = match raw_kind.as_str() {
+            "Movie" => (BaseItemKind::Movie, name),
+            "Series" => (BaseItemKind::Series, name),
+            "Episode" => {
+                let Some(series_name) = series_name else { continue };
+                let (Some(season), Some(episode)) = (season, episode) else { continue };
+                (
+                    BaseItemKind::Episode,
+                    format!("{series_name} S{season:02}E{episode:02}"),
+                )
+            }
+            _ => continue,
+        };
+
+        let known_ids = sqlx::query(
+            "SELECT provider, value FROM item_external_ids WHERE item_id = ?",
+        )
+        .bind(&item_id)
+        .fetch_all(app.db.pool())
+        .await?
+        .into_iter()
+        .map(|id| (id.get::<String, _>("provider"), id.get::<String, _>("value")))
+        .collect::<HashMap<_, _>>();
+
+        let query = MetadataQuery {
+            title,
+            year: row.get::<Option<i32>, _>("production_year").map(|year| year as u32),
+            kind,
+            known_ids,
+            preferred_languages: vec!["en".to_owned()],
+        };
+
+        match app.plugins.fetch_metadata("omdb", &query, 10_000).await {
+            Ok(Some(metadata)) => {
+                persist_metadata(app, &item_id, &metadata).await?;
+                refreshed += 1;
+            }
+            Ok(None) => {
+                sqlx::query("UPDATE items SET date_last_refreshed = ? WHERE id = ?")
+                    .bind(jf_db::users::now_iso())
+                    .bind(&item_id)
+                    .execute(app.db.pool())
+                    .await?;
+            }
+            Err(error) => {
+                tracing::warn!(item = %item_id, error = %error, "OMDb metadata lookup failed");
+            }
+        }
+    }
+
+    Ok(refreshed)
+}
+
+async fn persist_metadata(
+    app: &AppState,
+    item_id: &str,
+    metadata: &MetadataResult,
+) -> anyhow::Result<()> {
+    let genres = serde_json::to_string(&metadata.genres)?;
+    let taglines = metadata
+        .tagline
+        .as_ref()
+        .map(|tagline| serde_json::to_string(&[tagline]))
+        .transpose()?;
+    let people = metadata
+        .people
+        .iter()
+        .enumerate()
+        .map(|(index, person)| {
+            serde_json::json!({
+                "id": format!("{item_id}-person-{index}"),
+                "name": person.name,
+                "type": person.role,
+                "primaryImageTag": null,
+            })
+        })
+        .collect::<Vec<_>>();
+    let people = serde_json::to_string(&people)?;
+
+    sqlx::query(
+        "UPDATE items SET
+            name = COALESCE(?, name),
+            sort_name = COALESCE(?, sort_name),
+            production_year = COALESCE(?, production_year),
+            overview = COALESCE(?, overview),
+            premiere_date = COALESCE(?, premiere_date),
+            community_rating = COALESCE(?, community_rating),
+            official_rating = COALESCE(?, official_rating),
+            status = COALESCE(?, status),
+            run_time_ticks = COALESCE(?, run_time_ticks),
+            genres_json = CASE WHEN ? = '[]' THEN genres_json ELSE ? END,
+            taglines_json = COALESCE(?, taglines_json),
+            people_json = CASE WHEN ? = '[]' THEN people_json ELSE ? END,
+            date_last_refreshed = ?
+         WHERE id = ?",
+    )
+    .bind(&metadata.title)
+    .bind(&metadata.sort_title)
+    .bind(metadata.year)
+    .bind(&metadata.overview)
+    .bind(&metadata.premiere_date)
+    .bind(metadata.community_rating)
+    .bind(&metadata.official_rating)
+    .bind(&metadata.status)
+    .bind(metadata.run_time_ticks)
+    .bind(&genres)
+    .bind(&genres)
+    .bind(taglines)
+    .bind(&people)
+    .bind(&people)
+    .bind(jf_db::users::now_iso())
+    .bind(item_id)
+    .execute(app.db.pool())
+    .await?;
+
+    for (provider, value) in &metadata.external_ids {
+        sqlx::query(
+            "INSERT INTO item_external_ids (item_id, provider, provider_key, value)
+             VALUES (?, ?, 'default', ?)
+             ON CONFLICT(item_id, provider, provider_key)
+             DO UPDATE SET value = excluded.value",
+        )
+        .bind(item_id)
+        .bind(provider)
+        .bind(value)
+        .execute(app.db.pool())
+        .await?;
+    }
+
+    for image in &metadata.images {
+        if image.kind != jf_plugins::ImageKind::Primary
+            || !image.path.starts_with("https://m.media-amazon.com/")
+        {
+            continue;
+        }
+
+        let tag = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO images (item_id, image_type, index_num, path, width, height, size, tag)
+             VALUES (?, 'Primary', ?, ?, ?, ?, NULL, ?)
+             ON CONFLICT(item_id, image_type, index_num)
+             DO UPDATE SET path = excluded.path, width = excluded.width,
+                           height = excluded.height, tag = excluded.tag
+             WHERE images.path LIKE 'https://m.media-amazon.com/%'",
+        )
+        .bind(item_id)
+        .bind(image.index as i64)
+        .bind(&image.path)
+        .bind(image.width.map(i64::from))
+        .bind(image.height.map(i64::from))
+        .bind(&tag)
+        .execute(app.db.pool())
+        .await?;
+
+        let saved_path: Option<String> = sqlx::query_scalar(
+            "SELECT path FROM images WHERE item_id = ? AND image_type = 'Primary' AND index_num = ?",
+        )
+        .bind(item_id)
+        .bind(image.index as i64)
+        .fetch_optional(app.db.pool())
+        .await?;
+        if saved_path.as_deref() == Some(image.path.as_str()) {
+            let image_tags_raw: String =
+                sqlx::query_scalar("SELECT image_tags_json FROM items WHERE id = ?")
+                    .bind(item_id)
+                    .fetch_one(app.db.pool())
+                    .await?;
+            let mut image_tags: std::collections::BTreeMap<String, String> =
+                serde_json::from_str(&image_tags_raw).unwrap_or_default();
+            image_tags.insert("Primary".to_owned(), tag);
+            sqlx::query("UPDATE items SET image_tags_json = ? WHERE id = ?")
+                .bind(serde_json::to_string(&image_tags)?)
+                .bind(item_id)
+                .execute(app.db.pool())
+                .await?;
+        }
+    }
+
+    Ok(())
 }
 
 fn describe(report: &ScanReport) -> String {

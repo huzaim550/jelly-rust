@@ -248,7 +248,7 @@ describe("library admin", () => {
     });
 
     render(<App />);
-    await screen.findByText("My Libraries");
+    await screen.findByRole("heading", { name: /start building your library/i });
 
     // The server would reject this too; the client simply does not offer it.
     expect(screen.queryByRole("button", { name: /dashboard/i })).not.toBeInTheDocument();

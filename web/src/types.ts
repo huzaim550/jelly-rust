@@ -70,6 +70,11 @@ export interface BaseItem {
   Taglines?: string[];
   ImageTags?: Record<string, string> | null;
   BackdropImageTags?: string[];
+  ImageUrls?: Record<string, string>;
+  ParentBackdropItemId?: string | null;
+  Status?: string | null;
+  PremiereDate?: string | null;
+  People?: Array<{ Id: string; Name: string; Type: string }>;
   UserData?: UserData;
 }
 

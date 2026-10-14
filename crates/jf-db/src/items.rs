@@ -557,6 +557,16 @@ impl Database {
         let image_tags: std::collections::BTreeMap<String, String> =
             crate::json_column(&row.get::<String, _>("image_tags_json"), "items", "image_tags_json")
                 .unwrap_or_default();
+        let image_urls: std::collections::BTreeMap<String, String> = sqlx::query(
+            "SELECT image_type, path FROM images
+             WHERE item_id = ? AND path LIKE 'https://%' ORDER BY index_num",
+        )
+        .bind(row.get::<String, _>("id"))
+        .fetch_all(self.pool())
+        .await?
+        .into_iter()
+        .map(|image| (image.get::<String, _>("image_type"), image.get::<String, _>("path")))
+        .collect();
 
         let genres: Vec<String> = if fields.genres {
             crate::json_column(&row.get::<String, _>("genres_json"), "items", "genres_json")
@@ -649,6 +659,7 @@ impl Database {
             artists: Vec::new(),
             album_primary_image_tag: None,
             image_tags: if image_tags.is_empty() { None } else { Some(image_tags) },
+            image_urls,
             backdrop_image_tags: backdrop,
             parent_backdrop_item_id: None,
             parent_thumb_item_id: None,

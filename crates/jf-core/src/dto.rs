@@ -395,6 +395,8 @@ pub struct BaseItemDto {
     pub album_primary_image_tag: Option<String>,
     #[serde(rename = "ImageTags", skip_serializing_if = "Option::is_none")]
     pub image_tags: Option<std::collections::BTreeMap<String, String>>,
+    #[serde(rename = "ImageUrls", skip_serializing_if = "std::collections::BTreeMap::is_empty", default)]
+    pub image_urls: std::collections::BTreeMap<String, String>,
     #[serde(rename = "BackdropImageTags", skip_serializing_if = "Vec::is_empty", default)]
     pub backdrop_image_tags: Vec<String>,
     #[serde(rename = "ParentBackdropItemId", skip_serializing_if = "Option::is_none")]

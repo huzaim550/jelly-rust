@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSession } from "../App";
 import { api, ApiError } from "../api/client";
-import { PosterGrid, formatDuration, itemSubtitle } from "../components/ItemCard";
+import { PosterRail, itemSubtitle } from "../components/ItemCard";
 import type { BaseItem } from "../types";
 import type { Route } from "../router";
 
@@ -80,89 +80,109 @@ export function ItemDetail({
   if (!item) return null;
 
   const isFavorite = item.UserData?.IsFavorite ?? false;
+  const backdropItemId = item.ParentBackdropItemId || item.Id;
+  const seriesId = item.SeriesId;
+  const backdropUrl = item.ImageUrls?.Backdrop || item.ImageUrls?.Primary;
+  const hasBackdrop = Boolean(backdropUrl || item.ParentBackdropItemId || item.BackdropImageTags?.length);
 
   return (
-    <main>
-      <button type="button" className="link back" onClick={() => history.back()}>
-        ← Back
-      </button>
+    <main className="item-detail-page">
+      <section className={`detail-hero${hasBackdrop ? " has-backdrop" : ""}`}>
+        {hasBackdrop && (
+          <img
+            className="detail-backdrop"
+            src={backdropUrl || api.imageUrl(backdropItemId, "Backdrop", 1600)}
+            alt=""
+            fetchPriority="high"
+            onError={(event) => {
+              event.currentTarget.style.display = "none";
+            }}
+          />
+        )}
+        <div className="detail-hero-content">
+          <button type="button" className="detail-back link" onClick={() => history.back()}>
+            ← Back
+          </button>
 
-      <div className="detail">
-        <div className="detail-art">
-          {item.ImageTags?.Primary ? (
-            <img src={api.imageUrl(item.Id, "Primary", 500)} alt="" />
-          ) : (
-            <div className="poster placeholder">{item.Type}</div>
-          )}
-        </div>
-
-        <div className="detail-body">
-          <h1>{item.Name}</h1>
-          <p className="muted">{itemSubtitle(item)}</p>
-
-          {item.Overview && <p className="overview">{item.Overview}</p>}
-
-          {item.Genres && item.Genres.length > 0 && (
-            <div className="genres">
-              {item.Genres.map((genre) => (
-                <span key={genre} className="chip">
-                  {genre}
-                </span>
-              ))}
+          <div className="detail">
+            <div className="detail-art">
+              {item.ImageTags?.Primary || item.ImageUrls?.Primary ? (
+                <img
+                  src={item.ImageUrls?.Primary || api.imageUrl(item.Id, "Primary", 600)}
+                  alt={`${item.Name} poster`}
+                />
+              ) : (
+                <div className="poster placeholder">{item.Type}</div>
+              )}
             </div>
-          )}
 
-          <dl className="facts">
-            {item.RunTimeTicks ? (
-              <>
-                <dt>Runtime</dt>
-                <dd>{formatDuration(item.RunTimeTicks)}</dd>
-              </>
-            ) : null}
-            {item.CommunityRating ? (
-              <>
-                <dt>Rating</dt>
-                <dd>{item.CommunityRating.toFixed(1)}</dd>
-              </>
-            ) : null}
-            {item.OfficialRating ? (
-              <>
-                <dt>Certificate</dt>
-                <dd>{item.OfficialRating}</dd>
-              </>
-            ) : null}
-          </dl>
+            <div className="detail-body">
+              {item.Type === "Episode" && seriesId && (
+                <button
+                  type="button"
+                  className="detail-series-link"
+                  onClick={() => go({ name: "item", itemId: seriesId })}
+                >
+                  {item.SeriesName || "View series"}
+                </button>
+              )}
+              <span className="detail-type">{item.Type}</span>
+              <h1>{item.Name}</h1>
 
-          <div className="actions">
-            <button
-              type="button"
-              className="primary"
-              onClick={() => onPlay({ itemId: item.Id, title: item.Name })}
-            >
-              Play
-            </button>
-            <button
-              type="button"
-              className="ghost"
-              onClick={() => void toggleFavorite()}
-              disabled={favoriteBusy}
-            >
-              {isFavorite ? "♥ Remove from favourites" : "♡ Add to favourites"}
-            </button>
+              <div className="detail-meta">
+                {itemSubtitle(item) && <span>{itemSubtitle(item)}</span>}
+                {item.CommunityRating != null && item.CommunityRating > 0 && (
+                  <span className="detail-rating" aria-label={`Rating ${item.CommunityRating.toFixed(1)} out of 10`}>
+                    <span aria-hidden="true">★</span> {item.CommunityRating.toFixed(1)}
+                  </span>
+                )}
+                {item.OfficialRating && <span className="detail-cert">{item.OfficialRating}</span>}
+              </div>
+
+              {item.Overview && <p className="overview">{item.Overview}</p>}
+
+              {item.Genres && item.Genres.length > 0 && (
+                <div className="genres">
+                  {item.Genres.map((genre) => (
+                    <span key={genre} className="chip">
+                      {genre}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div className="actions detail-actions">
+                <button
+                  type="button"
+                  className="primary detail-play"
+                  onClick={() => onPlay({ itemId: item.Id, title: item.Name })}
+                >
+                  <span aria-hidden="true">▶</span> Play
+                </button>
+                <button
+                  type="button"
+                  className={`ghost detail-favorite${isFavorite ? " is-favorite" : ""}`}
+                  onClick={() => void toggleFavorite()}
+                  disabled={favoriteBusy}
+                  aria-pressed={isFavorite}
+                >
+                  <span aria-hidden="true">{isFavorite ? "♥" : "♡"}</span>
+                  {isFavorite ? "In favourites" : "Add to favourites"}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      </section>
 
       {children.length > 0 && (
-        <section>
-          <h2>{item.Type === "Season" ? "Episodes" : "Seasons"}</h2>
-          <PosterGrid
-            items={children}
-            onOpen={(child) => go({ name: "item", itemId: child.Id })}
-            onPlay={(child) => onPlay({ itemId: child.Id, title: child.Name })}
-            emptyText=""
-          />
-        </section>
+        <PosterRail
+          title={item.Type === "Season" ? "Episodes" : "Seasons"}
+          kicker={item.Name}
+          items={children}
+          onOpen={(child) => go({ name: "item", itemId: child.Id })}
+          onPlay={(child) => onPlay({ itemId: child.Id, title: child.Name })}
+        />
       )}
     </main>
   );

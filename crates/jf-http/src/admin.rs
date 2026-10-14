@@ -76,6 +76,97 @@ pub async fn post_startup_configuration(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Debug, Deserialize)]
+pub struct OmdbApiKeyBody {
+    #[serde(rename = "ApiKey")]
+    api_key: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OmdbApiKeyStatus {
+    #[serde(rename = "Configured")]
+    configured: bool,
+}
+
+/// `GET /Plugins/omdb/Configuration` — report configuration without exposing the key.
+pub async fn get_omdb_api_key(
+    State(app): State<Shared>,
+    auth: RequireAuth,
+) -> Result<Json<OmdbApiKeyStatus>, ApiError> {
+    require_admin(&auth)?;
+    Ok(Json(omdb_api_key_status(&app).await?))
+}
+
+/// `POST /Plugins/omdb/Configuration` — save the key used by the OMDb provider.
+pub async fn post_omdb_api_key(
+    State(app): State<Shared>,
+    auth: RequireAuth,
+    Json(body): Json<OmdbApiKeyBody>,
+) -> Result<Json<OmdbApiKeyStatus>, ApiError> {
+    require_admin(&auth)?;
+    if !app.plugins.plugin_ids().await.iter().any(|id| id == "omdb") {
+        return Err(ApiError::bad_request(
+            "The OMDb metadata plugin is not loaded. Check the server's plugin directory and restart it.",
+        ));
+    }
+    let key = body.api_key.trim();
+    if key.is_empty() {
+        return Err(ApiError::bad_request("An OMDb API key is required."));
+    }
+    if key.len() > 4096 {
+        return Err(ApiError::bad_request("The OMDb API key is too long."));
+    }
+
+    app.plugins
+        .plugin_config_set("omdb", "api_key", key)
+        .await
+        .map_err(|error| ApiError::internal(format!("could not save OMDb API key: {error}")))?;
+    sqlx::query("UPDATE items SET date_last_refreshed = NULL WHERE is_folder = 0")
+        .execute(app.db.pool())
+        .await
+        .map_err(|error| ApiError::internal(format!("could not queue metadata refresh: {error}")))?;
+    app.scans
+        .refresh_all()
+        .await
+        .map_err(|error| ApiError::internal(format!("could not start metadata refresh: {error}")))?;
+    Ok(Json(OmdbApiKeyStatus { configured: true }))
+}
+
+/// `DELETE /Plugins/omdb/Configuration` — clear the saved key.
+pub async fn delete_omdb_api_key(
+    State(app): State<Shared>,
+    auth: RequireAuth,
+) -> Result<Json<OmdbApiKeyStatus>, ApiError> {
+    require_admin(&auth)?;
+    app.plugins
+        .plugin_config_set("omdb", "api_key", "")
+        .await
+        .map_err(|error| ApiError::internal(format!("could not remove OMDb API key: {error}")))?;
+    Ok(Json(omdb_api_key_status(&app).await?))
+}
+
+async fn omdb_api_key_status(app: &Shared) -> Result<OmdbApiKeyStatus, ApiError> {
+    let stored = app
+        .plugins
+        .plugin_config_get("omdb", "api_key")
+        .await
+        .map_err(|error| ApiError::internal(format!("could not read OMDb configuration: {error}")))?;
+    Ok(OmdbApiKeyStatus {
+        configured: stored.is_some_and(|key| !key.trim().is_empty())
+            || std::env::var("OMDB_API_KEY").is_ok_and(|key| !key.trim().is_empty()),
+    })
+}
+
+fn require_admin(auth: &RequireAuth) -> Result<(), ApiError> {
+    if auth.0.is_admin() {
+        Ok(())
+    } else {
+        Err(ApiError::forbidden(
+            "Managing plugin settings requires administrator access.",
+        ))
+    }
+}
+
 /// Persist a server-level setting.
 ///
 /// There is no settings table, so these live in `plugin_config` under a

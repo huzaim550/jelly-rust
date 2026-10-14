@@ -12,6 +12,7 @@ import { LibrarySettings } from "./screens/Dashboard";
 import { Library } from "./screens/Library";
 import { ItemDetail } from "./screens/ItemDetail";
 import { Player } from "./screens/Player";
+import { ApiKeys } from "./screens/ApiKeys";
 
 type Status = "loading" | "onboarding" | "unauthenticated" | "ready" | "unreachable";
 
@@ -210,6 +211,8 @@ function Screen({ route, go, onPlay }: ScreenProps) {
       return <Home go={go} onPlay={onPlay} />;
     case "dashboard":
       return <LibrarySettings go={go} />;
+    case "api-keys":
+      return <ApiKeys />;
     case "library":
       return <Library viewId={route.viewId} go={go} onPlay={onPlay} />;
     case "item":

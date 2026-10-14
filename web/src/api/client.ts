@@ -408,6 +408,18 @@ export const api = {
     return request("GET", "/Plugins");
   },
 
+  omdbApiKeyStatus(): Promise<{ Configured: boolean }> {
+    return request("GET", "/Plugins/omdb/Configuration");
+  },
+
+  saveOmdbApiKey(apiKey: string): Promise<{ Configured: boolean }> {
+    return request("POST", "/Plugins/omdb/Configuration", { body: { ApiKey: apiKey } });
+  },
+
+  removeOmdbApiKey(): Promise<{ Configured: boolean }> {
+    return request("DELETE", "/Plugins/omdb/Configuration");
+  },
+
   // ------------------------------------------------------------- onboarding
 
   startupConfiguration(): Promise<{

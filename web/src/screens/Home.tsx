@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSession } from "../App";
 import { api } from "../api/client";
-import { PosterGrid } from "../components/ItemCard";
+import { itemSubtitle, PosterRail } from "../components/ItemCard";
 import { libraryLabel, useLibraries } from "../library";
 import type { BaseItem } from "../types";
 import type { Route } from "../router";
@@ -32,6 +32,8 @@ export function Home({
   const [viewsError, setViewsError] = useState("");
   const [resume, setResume] = useState<BaseItem[]>([]);
   const [nextUp, setNextUp] = useState<BaseItem[]>([]);
+  const [recent, setRecent] = useState<BaseItem[]>([]);
+  const [catalogError, setCatalogError] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -40,10 +42,11 @@ export function Home({
 
     (async () => {
       // Independent requests so one slow endpoint does not blank the page.
-      const [v, r, n] = await Promise.allSettled([
+      const [v, r, n, latest] = await Promise.allSettled([
         api.views(userId),
         api.resume(userId, 12),
         api.nextUp(userId, 12),
+        api.latest(userId, 16),
       ]);
       if (cancelled) return;
 
@@ -55,6 +58,12 @@ export function Home({
       }
       if (r.status === "fulfilled") setResume(r.value.Items);
       if (n.status === "fulfilled") setNextUp(n.value.Items);
+      if (latest.status === "fulfilled") {
+        setRecent(latest.value.Items);
+        setCatalogError("");
+      } else {
+        setCatalogError(latest.reason instanceof Error ? latest.reason.message : String(latest.reason));
+      }
     })().finally(() => {
       if (!cancelled) setLoading(false);
     });
@@ -68,127 +77,161 @@ export function Home({
   // scanning flag flips back to false.
   useEffect(() => {
     if (scanning || !userId) return;
-    void api
-      .resume(userId, 12)
-      .then((r) => setResume(r.Items))
-      .catch(() => {});
+    void Promise.all([api.resume(userId, 12), api.latest(userId, 16)])
+      .then(([resumeResult, latestResult]) => {
+        setResume(resumeResult.Items);
+        setRecent(latestResult.Items);
+        setCatalogError("");
+      })
+      .catch((err: unknown) => {
+        setCatalogError(err instanceof Error ? err.message : String(err));
+      });
   }, [scanning, userId]);
 
   const openItem = (item: BaseItem) => go({ name: "item", itemId: item.Id });
   const playItem = (item: BaseItem) => onPlay({ itemId: item.Id, title: item.Name });
+  const featured = resume[0] ?? recent[0] ?? nextUp[0] ?? null;
+  const featuredImageId = featured?.ParentBackdropItemId || featured?.Id;
+  const featuredImageKind =
+    featured && (featured.ParentBackdropItemId || featured.BackdropImageTags?.length)
+      ? "Backdrop"
+      : "Primary";
+  const featuredImageUrl = featured?.ImageUrls?.Backdrop || featured?.ImageUrls?.Primary;
+  const recentItems = recent;
 
   if (loading && folders.length === 0) {
     return <p className="muted loading">Loading…</p>;
   }
 
   return (
-    <main>
-      {(error || viewsError) && <p className="error">{error || viewsError}</p>}
+    <main className="home-page">
+      {(error || viewsError || catalogError) && (
+        <p className="error">{error || viewsError || catalogError}</p>
+      )}
 
       {scanning ? (
         <ScanPanel folders={folders} statuses={statuses} />
       ) : (
-        <section>
-          <h2>My Libraries</h2>
-          {views.length === 0 ? (
-            <div className="empty">
-              <p>No libraries yet.</p>
-              <p className="muted">
-                Add one from{" "}
-                <button type="button" className="link" onClick={() => go({ name: "dashboard" })}>
-                  library settings
-                </button>
-                , or run <code>jf-admin add-library /path/to/media movies</code>.
-              </p>
-            </div>
-          ) : (
-            <div className="grid views">
-              {views.map((view) => {
-                const folder = folders.find(
-                  (candidate) => candidate.Name.toLowerCase() === view.Name.toLowerCase(),
-                );
-                const status = folder ? statuses[folder.ItemId] : undefined;
-                return (
-                  <button
-                    key={view.Id}
-                    type="button"
-                    className="card view"
-                    onClick={() => go({ name: "library", viewId: view.Id })}
-                  >
-                    <span className="view-icon" aria-hidden="true">
-                      <svg viewBox="0 0 24 24">
-                        <path d="M4 5.75h6l2 2h8v10.5H4z" />
-                        <path d="M4.5 9.25h15" />
-                      </svg>
-                    </span>
-                    <span className="view-copy">
-                      <span className="view-name">{view.Name}</span>
-                      <span className="muted small">{libraryLabel(view.CollectionType ?? null)}</span>
-                      {status?.state === "Done" && status.detail?.startsWith("No supported media") && (
-                        <span className="muted small">{status.detail}</span>
-                      )}
-                    </span>
+        <>
+          {featured && (
+            <section className="featured">
+              {featuredImageId && (
+                <img
+                  className="featured-image"
+                  src={featuredImageUrl || api.imageUrl(featuredImageId, featuredImageKind, 1600)}
+                  alt=""
+                  fetchPriority="high"
+                  onError={(event) => {
+                    event.currentTarget.style.visibility = "hidden";
+                  }}
+                />
+              )}
+              <div className="featured-copy">
+                <span className="featured-eyebrow">Featured for you</span>
+                <h1>{featured.Name}</h1>
+                <div className="featured-meta">
+                  {featured.Type === "Episode" && featured.SeriesName && (
+                    <span>{featured.SeriesName}</span>
+                  )}
+                  {itemSubtitle(featured) && <span>{itemSubtitle(featured)}</span>}
+                </div>
+                {featured.Overview && <p>{featured.Overview}</p>}
+                <div className="featured-actions">
+                  <button type="button" className="primary" onClick={() => playItem(featured)}>
+                    <span aria-hidden="true">▶</span> Play
                   </button>
-                );
-              })}
-            </div>
+                  <button type="button" className="featured-secondary" onClick={() => openItem(featured)}>
+                    More info
+                  </button>
+                </div>
+              </div>
+            </section>
           )}
-        </section>
+
+          {views.length > 0 ? (
+            <section className="home-libraries">
+              <div className="catalog-heading">
+                <div>
+                  <span className="catalog-kicker">Your collection</span>
+                  <h2>My Libraries</h2>
+                </div>
+              </div>
+              <div className="grid views">
+                {views.map((view) => {
+                  const folder = folders.find(
+                    (candidate) => candidate.Name.toLowerCase() === view.Name.toLowerCase(),
+                  );
+                  const status = folder ? statuses[folder.ItemId] : undefined;
+                  return (
+                    <button
+                      key={view.Id}
+                      type="button"
+                      className="card view"
+                      onClick={() => go({ name: "library", viewId: view.Id })}
+                    >
+                      <span className="view-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24">
+                          <path d="M4 5.75h6l2 2h8v10.5H4z" />
+                          <path d="M4.5 9.25h15" />
+                        </svg>
+                      </span>
+                      <span className="view-copy">
+                        <span className="view-name">{view.Name}</span>
+                        <span className="muted small">{libraryLabel(view.CollectionType ?? null)}</span>
+                        {status?.state === "Done" && status.detail?.startsWith("No supported media") && (
+                          <span className="muted small">{status.detail}</span>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          ) : (
+            <section className="home-empty">
+              <h2>Start building your library</h2>
+              <p className="muted">
+                No libraries yet. Add a media folder to see your movies and shows here.
+              </p>
+              <button type="button" className="primary" onClick={() => go({ name: "dashboard" })}>
+                Open library settings
+              </button>
+            </section>
+          )}
+        </>
       )}
 
       {resume.length > 0 && (
-        <section>
-          <h2>Continue Watching</h2>
-          <PosterGrid items={resume} onOpen={openItem} onPlay={playItem} />
-        </section>
+        <PosterRail
+          title="Continue Watching"
+          kicker="Pick up where you left off"
+          items={resume}
+          onOpen={openItem}
+          onPlay={playItem}
+        />
       )}
 
       {nextUp.length > 0 && (
-        <section>
-          <h2>Next Up</h2>
-          <PosterGrid items={nextUp} onOpen={openItem} onPlay={playItem} />
-        </section>
+        <PosterRail
+          title="Next Up"
+          kicker="Keep your series going"
+          items={nextUp}
+          onOpen={openItem}
+          onPlay={playItem}
+        />
       )}
 
-      {!loading && resume.length === 0 && nextUp.length === 0 && views.length > 0 && (
-        <section>
-          <h2>Recently Added</h2>
-          <RecentItems userId={userId} open={openItem} play={playItem} />
-        </section>
+      {recentItems.length > 0 && (
+        <PosterRail
+          title="Recently Added"
+          kicker="Fresh from your collection"
+          items={recentItems}
+          onOpen={openItem}
+          onPlay={playItem}
+        />
       )}
     </main>
   );
-}
-
-/** Recently added items, so a fresh library is not an empty dashboard. */
-function RecentItems({
-  userId,
-  open,
-  play,
-}: {
-  userId: string;
-  open: (item: BaseItem) => void;
-  play: (item: BaseItem) => void;
-}) {
-  const [items, setItems] = useState<BaseItem[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void api
-      .latest(userId, 12)
-      .then((r) => {
-        if (!cancelled) setItems(r.Items);
-      })
-      .catch(() => {
-        // A missing "latest" endpoint should not break the dashboard.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [userId]);
-
-  if (items.length === 0) return null;
-  return <PosterGrid items={items} onOpen={open} onPlay={play} />;
 }
 
 /** Replaces the tiles while a scan runs. */

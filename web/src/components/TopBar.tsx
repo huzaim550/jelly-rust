@@ -52,6 +52,14 @@ export function TopBar() {
 
       {session?.user.Name && <span className="muted username">{session.user.Name}</span>}
 
+      <button
+        type="button"
+        className="link"
+        onClick={() => navigate({ name: "api-keys" })}
+      >
+        API Keys
+      </button>
+
       <button type="button" className="link" onClick={() => void logout()}>
         Sign out
       </button>

@@ -34,6 +34,7 @@ describe("route parsing", () => {
     const routes = [
       { name: "home" },
       { name: "dashboard" },
+      { name: "api-keys" },
       { name: "library", viewId: "lib-1" },
       { name: "item", itemId: "item-1" },
       { name: "search", term: "dune" },
@@ -153,6 +154,56 @@ describe("in-app navigation", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: /^dashboard$/i })).toBeInTheDocument();
+  });
+
+  it("opens the personal API key settings page from the top bar", async () => {
+    seedAdmin(server);
+    server.on("GET", "/Plugins/omdb/Configuration", { Configured: false });
+    render(<App />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: /^api keys$/i }));
+    expect(await screen.findByRole("heading", { name: "API Keys" })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/settings/api-keys");
+  });
+
+  it("saves the OMDb key to the server and uses it for OMDb requests", async () => {
+    seedAdmin(server);
+    server.on("GET", "/Plugins/omdb/Configuration", { Configured: false });
+    server.on("POST", "/Plugins/omdb/Configuration", { Configured: true });
+    server.on("GET", "https://www.omdbapi.com/", {
+      Response: "True",
+      Search: [
+        {
+          Title: "Dune",
+          Year: "2021",
+          imdbID: "tt1160419",
+          Type: "movie",
+          Poster: "N/A",
+        },
+      ],
+    });
+    render(<App />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: /^api keys$/i }));
+    await user.type(screen.getByLabelText("OMDb API key"), "personal-test-key");
+    await user.click(screen.getByRole("button", { name: "Save key" }));
+    await user.type(screen.getByLabelText("Title"), "Dune");
+    await user.click(screen.getByRole("button", { name: "Search", exact: true }));
+
+    expect(await screen.findByText("tt1160419")).toBeInTheDocument();
+    const omdbCall = server.calls.find((call) => call.path === "https://www.omdbapi.com/");
+    expect(omdbCall?.query).toContain("apikey=personal-test-key");
+    const savedKeyCall = server.calls.find(
+      (call) => call.method === "POST" && call.path === "/Plugins/omdb/Configuration",
+    );
+    expect(savedKeyCall?.body).toEqual({ ApiKey: "personal-test-key" });
+    expect(
+      server.calls
+        .filter((call) => call.path !== "https://www.omdbapi.com/")
+        .every((call) => !call.query.includes("apikey")),
+    ).toBe(true);
   });
 
   it("searches when the top-bar query is typed", async () => {

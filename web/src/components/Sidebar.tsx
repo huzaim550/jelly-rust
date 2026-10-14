@@ -85,6 +85,16 @@ export function Sidebar({ route }: { route: Route }) {
         )}
 
         <div className="sidebar-group">
+          <span className="sidebar-label">Account</span>
+          <SidebarLink
+            label="API Keys"
+            icon="⚿"
+            selected={active({ name: "api-keys" })}
+            onClick={() => navigate({ name: "api-keys" })}
+          />
+        </div>
+
+        <div className="sidebar-group">
           <span className="sidebar-label">Media</span>
           <SidebarLink
             label="Browse"

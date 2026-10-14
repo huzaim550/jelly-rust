@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from "react";
 export type Route =
   | { name: "home" }
   | { name: "dashboard" }
+  | { name: "api-keys" }
   | { name: "library"; viewId: string }
   | { name: "item"; itemId: string }
   | { name: "search"; term: string };
@@ -25,6 +26,9 @@ export function parseLocation(pathname: string, search: string): Route {
   if (segments[0] === "library" && segments[1]) return { name: "library", viewId: segments[1] };
   if (segments[0] === "item" && segments[1]) return { name: "item", itemId: segments[1] };
   if (segments[0] === "dashboard") return { name: "dashboard" };
+  if (segments[0] === "settings" && segments[1] === "api-keys") {
+    return { name: "api-keys" };
+  }
   if (segments[0] === "search") return { name: "search", term };
   return { name: "home" };
 }
@@ -35,6 +39,8 @@ export function hrefFor(route: Route): string {
       return "/";
     case "dashboard":
       return "/dashboard";
+    case "api-keys":
+      return "/settings/api-keys";
     case "library":
       return `/library/${route.viewId}`;
     case "item":

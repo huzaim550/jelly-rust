@@ -1,0 +1,12 @@
+.git
+.gitignore
+.dockerignore
+target
+spikes
+jf-data
+**/node_modules
+**/dist
+web/tsconfig.tsbuildinfo
+*.db
+*.db-shm
+*.db-wal

@@ -1,0 +1,11 @@
+id = "omdb"
+name = "OMDb Metadata Provider"
+version = "1.0.0"
+description = "Fetches movie, series, and episode metadata from OMDb."
+author = "jellyfin-clone contributors"
+api_version = "1.0"
+entry = "omdb_plugin"
+
+capabilities = ["read_items", "network", "config", "events"]
+metadata_providers = ["omdb"]
+depends_on = []

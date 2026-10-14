@@ -179,6 +179,12 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/System/Shutdown", post(routes::shutdown_server))
         .route("/System/Restart", post(routes::restart_server))
         .route("/Plugins", get(routes::list_plugins))
+        .route(
+            "/Plugins/omdb/Configuration",
+            get(admin::get_omdb_api_key)
+                .post(admin::post_omdb_api_key)
+                .delete(admin::delete_omdb_api_key),
+        )
         // Auth
         .route("/Users/AuthenticateByName", post(routes::authenticate))
         .route("/Users/Public", get(routes::public_users))

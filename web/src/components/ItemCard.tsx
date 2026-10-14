@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { api } from "../api/client";
 import type { BaseItem } from "../types";
 
@@ -72,11 +73,11 @@ export function resumeFraction(item: BaseItem): number {
 }
 
 export function hasPoster(item: BaseItem): boolean {
-  return Boolean(item.ImageTags?.Primary);
+  return Boolean(item.ImageTags?.Primary || item.ImageUrls?.Primary);
 }
 
 export function posterUrl(item: BaseItem, width = 400): string {
-  return api.imageUrl(item.Id, "Primary", width);
+  return item.ImageUrls?.Primary || api.imageUrl(item.Id, "Primary", width);
 }
 
 /**
@@ -143,18 +144,20 @@ export function PosterGrid({
   onOpen,
   onPlay,
   emptyText = "Nothing here yet.",
+  className = "",
 }: {
   items: BaseItem[];
   onOpen: (item: BaseItem) => void;
   onPlay: (item: BaseItem) => void;
   emptyText?: string;
+  className?: string;
 }) {
   if (items.length === 0) {
     return <p className="muted empty">{emptyText}</p>;
   }
 
   return (
-    <div className="grid posters">
+    <div className={`grid posters${className ? ` ${className}` : ""}`}>
       {items.map((item) => (
         <ItemCard
           key={item.Id}
@@ -164,5 +167,67 @@ export function PosterGrid({
         />
       ))}
     </div>
+  );
+}
+
+/** Horizontally browsable poster row with explicit, keyboard-accessible controls. */
+export function PosterRail({
+  items,
+  title,
+  kicker,
+  onOpen,
+  onPlay,
+}: {
+  items: BaseItem[];
+  title: string;
+  kicker?: string;
+  onOpen: (item: BaseItem) => void;
+  onPlay: (item: BaseItem) => void;
+}) {
+  const railRef = useRef<HTMLDivElement>(null);
+
+  function scroll(direction: -1 | 1) {
+    const rail = railRef.current;
+    if (!rail) return;
+    rail.scrollBy({ left: direction * rail.clientWidth * 0.8, behavior: "smooth" });
+  }
+
+  return (
+    <section className="catalog-row">
+      <div className="catalog-heading">
+        <div>
+          {kicker && <span className="catalog-kicker">{kicker}</span>}
+          <h2>{title}</h2>
+        </div>
+        <div className="rail-controls" aria-label={`${title} controls`}>
+          <button
+            type="button"
+            className="rail-control"
+            aria-label={`Scroll ${title} left`}
+            onClick={() => scroll(-1)}
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            className="rail-control"
+            aria-label={`Scroll ${title} right`}
+            onClick={() => scroll(1)}
+          >
+            ›
+          </button>
+        </div>
+      </div>
+      <div ref={railRef} className="grid posters poster-row" role="region" aria-label={title}>
+        {items.map((item) => (
+          <ItemCard
+            key={item.Id}
+            item={item}
+            onOpen={() => onOpen(item)}
+            onPlay={() => onPlay(item)}
+          />
+        ))}
+      </div>
+    </section>
   );
 }

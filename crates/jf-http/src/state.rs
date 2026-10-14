@@ -30,13 +30,23 @@ impl DataPaths {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         let root = root.into();
 
-        // Plugins default to the data directory, but `JF_PLUGINS_DIR` lets a
-        // development checkout point at in-repo plugins. Those have their
-        // `node_modules` already linked, which a copy into the data directory
-        // would break.
+        // An explicit directory takes precedence. In a source checkout, load
+        // the built-in plugin from the repository so it is available without
+        // copying it (and its linked node_modules) into the data directory.
+        // Packaged deployments set JF_PLUGINS_DIR; otherwise plugins live in
+        // the data directory as before.
+        let checkout_plugins = PathBuf::from("plugins");
+        let bundled_omdb = checkout_plugins.join("omdb/plugin.json").is_file()
+            && checkout_plugins.join("omdb/dist/index.js").is_file();
         let plugins = std::env::var("JF_PLUGINS_DIR")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| root.join("plugins"));
+            .unwrap_or_else(|_| {
+                if bundled_omdb {
+                    checkout_plugins
+                } else {
+                    root.join("plugins")
+                }
+            });
 
         Self {
             database: root.join("jf.db"),

@@ -155,6 +155,74 @@ describe("dashboard", () => {
     expect(within(tileGrid!).getByRole("button", { name: /films/i })).toBeInTheDocument();
   });
 
+  it("shows a featured title and streaming-style home rows when media is available", async () => {
+    server.on("GET", `/Users/${ADMIN_USER.Id}/Items`, {
+      Items: [
+        {
+          Id: "featured-1",
+          Name: "The Feature",
+          Type: "Movie",
+          ServerId: "server-1",
+          IsFolder: false,
+          ProductionYear: 2024,
+          Overview: "A sample film featured on the home screen.",
+          ImageTags: { Primary: "poster-tag" },
+          BackdropImageTags: ["backdrop-tag"],
+        },
+      ],
+      TotalRecordCount: 1,
+      StartIndex: 0,
+    });
+    render(<App />);
+
+    expect(await screen.findByText("Featured for you")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "The Feature" })).toBeInTheDocument();
+    const featuredActions = document.querySelector(".featured-actions");
+    expect(featuredActions).not.toBeNull();
+    expect(within(featuredActions!).getByRole("button", { name: /^play$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /more info/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "My Libraries" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Recently Added" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Scroll Recently Added right" })).toBeInTheDocument();
+  });
+
+  it("shows a cinematic item detail with metadata and working actions", async () => {
+    window.history.replaceState({}, "", "/item/detail-1");
+    server.on("GET", `/Users/${ADMIN_USER.Id}/Items/detail-1`, {
+      Id: "detail-1",
+      Name: "The Feature",
+      Type: "Movie",
+      ServerId: "server-1",
+      IsFolder: false,
+      ProductionYear: 2024,
+      RunTimeTicks: 7_200_000_000,
+      Overview: "A sample film description.",
+      Genres: ["Drama", "Adventure"],
+      CommunityRating: 8.3,
+      OfficialRating: "PG-13",
+      ImageTags: { Primary: "poster-tag" },
+      BackdropImageTags: ["backdrop-tag"],
+      UserData: {
+        PlaybackPositionTicks: 0,
+        PlayCount: 0,
+        IsFavorite: false,
+        Played: false,
+        UnplayedItemCount: 0,
+      },
+    });
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "The Feature" })).toBeInTheDocument();
+    expect(screen.getByText("A sample film description.")).toBeInTheDocument();
+    expect(screen.getByText("Drama")).toBeInTheDocument();
+    expect(screen.getByText("8.3")).toBeInTheDocument();
+    expect(document.querySelector(".detail-backdrop")).not.toBeNull();
+    expect(screen.getByRole("button", { name: /add to favourites/i })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
   it("collapses the home sidebar behind a hamburger menu", async () => {
     render(<App />);
     const user = userEvent.setup();
@@ -271,7 +339,7 @@ describe("dashboard", () => {
     render(<App />);
 
     await waitFor(() => expect(screen.getByText("Continue Watching")).toBeInTheDocument());
-    expect(screen.getByText("Dune")).toBeInTheDocument();
+    expect(screen.getAllByText("Dune").length).toBeGreaterThan(0);
     // One hour into a six-hour film: five hours remain, which is what
     // Jellyfin labels the tile with.
     expect(screen.getByText("5h 0m left")).toBeInTheDocument();

@@ -1,12 +1,13 @@
 /* ==========================================================================
-   jellyfin-clone web client — "Cinema" theme
+   jellyfin-clone web client — components
 
-   A single coherent design system in the Netflix idiom: a near-black canvas,
-   cinematic full-bleed art, one confident red, and quiet chrome that gets out
-   of the way of the posters.
+   Structure and component styles only. The design tokens (colour, type,
+   radii, elevation) live in `theme.css`, which carries Jellyfin's theme system
+   and bridges it onto the semantic names used throughout this file. Switching
+   `[data-theme]` there re-skins everything below.
 
    Sections
-     01  tokens
+     01  tokens (see theme.css)
      02  reset & base
      03  typography
      04  app shell
@@ -28,58 +29,10 @@
 
 /* ------------------------------------------------------------------ 01 tokens */
 
-:root {
-  /* Canvas — near-black, a hair warm so it reads as film rather than OLED-off. */
-  --bg: #0b0b0d;
-  --bg-deep: #050506;
-  --surface: #141417;
-  --surface-2: #1b1b1f;
-  --surface-3: #26262b;
-  --border: #2b2b31;
-  --border-soft: #ffffff14;
-
-  /* Ink */
-  --text: #ffffff;
-  --text-2: #b9b9c1;
-  --text-3: #7e7e8a;
-
-  /* One confident red, plus its interaction states. */
-  --accent: #e50914;
-  --accent-hover: #f6121d;
-  --accent-press: #c40812;
-  --accent-soft: #e5091424;
-
-  /* Supporting signals */
-  --gold: #f5c518;
-  --green: #46d369;
-  --danger: #ff5c5c;
-
-  /* Radii — posters stay cinematic and nearly square; controls are softer. */
-  --r-xs: 4px;
-  --r-sm: 6px;
-  --r-md: 10px;
-  --r-lg: 16px;
-  --r-pill: 999px;
-
-  /* Elevation */
-  --shadow-sm: 0 1px 3px #00000066;
-  --shadow-md: 0 10px 30px #00000099;
-  --shadow-lg: 0 26px 70px #000000d9;
-
-  /* Type */
-  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
-
-  /* Motion */
-  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
-  --fast: 140ms var(--ease);
-  --slow: 320ms var(--ease);
-
-  /* Chrome metrics */
-  --topbar-h: 68px;
-  --gutter: clamp(16px, 4vw, 60px);
-}
+/* Design tokens live in `theme.css` now. That file holds Jellyfin's palette
+   (`--jf-palette-*`) per `[data-theme]` and bridges it onto the semantic names
+   used below (`--bg`, `--accent`, `--text`, …). Edit theme.css to add or change
+   a theme; this stylesheet consumes the tokens and never defines them. */
 
 /* ------------------------------------------------------------- 02 reset & base */
 
@@ -567,6 +520,39 @@ section {
 
 .profile-menu button.danger:hover {
   color: var(--danger);
+}
+
+/* Theme picker inside the account menu. */
+.profile-theme {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px 12px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.profile-theme > span {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.profile-theme select {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.profile-theme select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* --------------------------------------------------------- 06 sidebar drawer */

@@ -7,6 +7,7 @@ import { getOmdbKey, omdbRequest, removeOmdbKey, saveOmdbKey, type OmdbTitle } f
 export function ApiKeys() {
   const { session } = useSession();
   const userId = session?.user.Id ?? "";
+  const isAdmin = session?.user.Policy.IsAdministrator ?? false;
   const [keyInput, setKeyInput] = useState("");
   const [hasKey, setHasKey] = useState(() => Boolean(userId && getOmdbKey(userId)));
   const [serverHasKey, setServerHasKey] = useState(false);
@@ -17,13 +18,15 @@ export function ApiKeys() {
   const [results, setResults] = useState<OmdbTitle[]>([]);
 
   useEffect(() => {
-    if (!userId) return;
+    // The OMDb key lives in server-wide plugin configuration and the endpoint
+    // is administrator-only; do not ask for it on a member's behalf.
+    if (!userId || !isAdmin) return;
     void api.omdbApiKeyStatus()
       .then((status) => setServerHasKey(status.Configured))
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : String(err));
       });
-  }, [userId]);
+  }, [userId, isAdmin]);
 
   async function saveKey(event: FormEvent) {
     event.preventDefault();
@@ -94,6 +97,16 @@ export function ApiKeys() {
     } finally {
       setBusy(false);
     }
+  }
+
+  // A hidden sidebar entry is not a boundary: the route is shareable, so a
+  // member who reaches it directly gets the same refusal the server gives.
+  if (!isAdmin) {
+    return (
+      <main>
+        <p className="error">API key management requires administrator access.</p>
+      </main>
+    );
   }
 
   return (

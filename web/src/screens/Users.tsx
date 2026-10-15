@@ -20,8 +20,9 @@ import type { Route } from "../router";
  */
 export function Users({ go }: { go: (route: Route) => void }) {
   const { session } = useSession();
+  const isAdmin = session?.user.Policy.IsAdministrator ?? false;
   // Library list, for the "specific libraries" access picker.
-  const { folders } = useLibraries();
+  const { folders } = useLibraries(isAdmin);
   const [users, setUsers] = useState<User[]>([]);
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -41,7 +42,7 @@ export function Users({ go }: { go: (route: Route) => void }) {
     void reload();
   }, [reload]);
 
-  if (!session?.user.Policy.IsAdministrator) {
+  if (!isAdmin || !session) {
     return (
       <main>
         <p className="error">User management requires administrator access.</p>

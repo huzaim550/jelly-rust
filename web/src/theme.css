@@ -1,0 +1,352 @@
+/* ==========================================================================
+   Theme layer — Jellyfin design tokens
+
+   Ported from jellyfin-web's theme system so this client shares its palette,
+   selector and variable names rather than inventing a second one:
+
+     * Source of truth: reference/jellyfin-web/src/themes/<scheme>/theme.scss
+       (and the compiled `themes/<scheme>/theme.css` shipped in the image).
+     * Selector mirrors Jellyfin's MUI config:
+         colorSchemeSelector: '[data-theme="%s"]', cssVarPrefix: 'jf'
+     * Variables are Jellyfin's `--jf-palette-*` names with Jellyfin's exact
+       values, so a theme copied from upstream drops straight in.
+
+   The bottom of this file *bridges* those tokens onto the semantic names the
+   rest of styles.css already uses (`--bg`, `--accent`, `--text`, …), which is
+   what makes one attribute flip re-skin the whole client.
+
+   The six upstream schemes plus this client's original "Cinema" palette are
+   exposed. Jellyfin's default ("dark") is the default here too.
+   ========================================================================== */
+
+/* ----------------------------------------------------------------- fonts --- */
+/* Jellyfin's default face is Noto Sans, self-hosted (no Google Fonts request).
+   Files are copied from the shipped image; only Latin ranges are bundled, so
+   other scripts fall back to the system stack. */
+
+@font-face {
+  font-family: "Noto Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/noto-sans-latin-400.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Noto Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/noto-sans-latin-700.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Noto Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/noto-sans-latin-ext-400.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+    U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0,
+    U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Noto Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/noto-sans-latin-ext-700.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+    U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0,
+    U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* --------------------------------------------------------------- palette --- */
+/* Each block sets only Jellyfin's variables; the bridge below derives the
+   app's tokens from them. `color-scheme` lets form controls and scrollbars
+   follow the theme. */
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --jf-palette-background-default: #101010;
+  --jf-palette-background-paper: #202020;
+  --jf-palette-background-defaultImage: none;
+  --jf-palette-primary-main: #00a4dc;
+  --jf-palette-primary-dark: #00729a;
+  --jf-palette-primary-light: #33b6e3;
+  --jf-palette-secondary-main: #00a4dc;
+  --jf-palette-text-primary: #fff;
+  --jf-palette-text-secondary: rgba(255, 255, 255, 0.7);
+  --jf-palette-divider: rgba(255, 255, 255, 0.12);
+  --jf-palette-action-hover: rgba(255, 255, 255, 0.08);
+  --jf-palette-action-focus: rgba(255, 255, 255, 0.12);
+  --jf-palette-error-main: #c62828;
+  --jf-palette-error-light: #d15353;
+  --jf-palette-AppBar-defaultBg: #202020;
+  --jf-palette-AppBar-transparentBg: rgba(0, 0, 0, 0.4);
+  --jf-palette-AppBar-gradient: none;
+  --jf-palette-FilledInput-bg: rgba(255, 255, 255, 0.09);
+  --jf-palette-starIcon-main: #f2b01e;
+  --jf-palette-SnackbarContent-bg: #303030;
+  --jf-palette-SnackbarContent-color: rgba(255, 255, 255, 0.87);
+  --jf-palette-Button-inheritContainedBg: #424242;
+  --jf-palette-Button-inheritContainedHoverBg: #616161;
+  --jf-card-borderRadius: 0.2em;
+  --jf-topbar-h: 64px;
+  --jf-font: "Noto Sans", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --jf-palette-background-default: #f2f2f2;
+  --jf-palette-background-paper: #e8e8e8;
+  --jf-palette-background-defaultImage: none;
+  --jf-palette-primary-main: #00a4dc;
+  --jf-palette-primary-dark: #00729a;
+  --jf-palette-primary-light: #33b6e3;
+  --jf-palette-secondary-main: #00a4dc;
+  --jf-palette-text-primary: #000;
+  --jf-palette-text-secondary: rgba(0, 0, 0, 0.87);
+  --jf-palette-divider: rgba(0, 0, 0, 0.14);
+  --jf-palette-action-hover: #ddd;
+  --jf-palette-action-focus: #bbb;
+  --jf-palette-error-main: #c62828;
+  --jf-palette-error-light: #d15353;
+  --jf-palette-AppBar-defaultBg: #e8e8e8;
+  --jf-palette-AppBar-transparentBg: rgba(232, 232, 232, 0.86);
+  --jf-palette-AppBar-gradient: none;
+  --jf-palette-FilledInput-bg: rgba(0, 0, 0, 0.06);
+  --jf-palette-starIcon-main: #f2b01e;
+  --jf-palette-SnackbarContent-bg: #303030;
+  --jf-palette-SnackbarContent-color: rgba(255, 255, 255, 0.87);
+  --jf-palette-Button-inheritContainedBg: #d8d8d8;
+  --jf-palette-Button-inheritContainedHoverBg: #ccc;
+  --jf-card-borderRadius: 0.2em;
+  --jf-topbar-h: 64px;
+  --jf-font: "Noto Sans", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+[data-theme="appletv"] {
+  color-scheme: light;
+  --jf-palette-background-default: #d5e9f2;
+  --jf-palette-background-paper: #eaeaea;
+  --jf-palette-background-defaultImage: none;
+  --jf-palette-primary-main: #00a4dc;
+  --jf-palette-primary-dark: #00729a;
+  --jf-palette-primary-light: #33b6e3;
+  --jf-palette-secondary-main: #00a4dc;
+  --jf-palette-text-primary: rgba(0, 0, 0, 0.87);
+  --jf-palette-text-secondary: rgba(0, 0, 0, 0.87);
+  --jf-palette-divider: rgba(0, 0, 0, 0.158);
+  --jf-palette-action-hover: rgba(0, 0, 0, 0.1);
+  --jf-palette-action-focus: rgba(0, 0, 0, 0.2);
+  --jf-palette-error-main: #c62828;
+  --jf-palette-error-light: #d15353;
+  --jf-palette-AppBar-defaultBg: #bcbcbc;
+  --jf-palette-AppBar-transparentBg: rgba(213, 233, 242, 0.86);
+  --jf-palette-AppBar-gradient: linear-gradient(to right, #bcbcbc, #a7b4b7, #beb5a5, #adbec2, #b9c7cb);
+  --jf-palette-FilledInput-bg: rgba(255, 255, 255, 0.9);
+  --jf-palette-starIcon-main: #f2b01e;
+  --jf-palette-SnackbarContent-bg: #303030;
+  --jf-palette-SnackbarContent-color: rgba(255, 255, 255, 0.87);
+  --jf-palette-Button-inheritContainedBg: rgba(0, 0, 0, 0.14);
+  --jf-palette-Button-inheritContainedHoverBg: rgba(0, 0, 0, 0.24);
+  --jf-card-borderRadius: 0.5rem;
+  --jf-topbar-h: 64px;
+  --jf-font: "Noto Sans", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+[data-theme="blueradiance"] {
+  color-scheme: dark;
+  --jf-palette-background-default: #033361;
+  --jf-palette-background-paper: #011432;
+  --jf-palette-background-defaultImage: none;
+  --jf-palette-primary-main: #00a4dc;
+  --jf-palette-primary-dark: #00729a;
+  --jf-palette-primary-light: #33b6e3;
+  --jf-palette-secondary-main: #00a4dc;
+  --jf-palette-text-primary: #eee;
+  --jf-palette-text-secondary: rgba(255, 255, 255, 0.9);
+  --jf-palette-divider: rgba(255, 255, 255, 0.12);
+  --jf-palette-action-hover: rgba(0, 164, 220, 0.2);
+  --jf-palette-action-focus: #00a4dc;
+  --jf-palette-error-main: #c62828;
+  --jf-palette-error-light: #d15353;
+  --jf-palette-AppBar-defaultBg: #011432;
+  --jf-palette-AppBar-transparentBg: rgba(0, 0, 0, 0.4);
+  --jf-palette-AppBar-gradient: none;
+  --jf-palette-FilledInput-bg: rgba(255, 255, 255, 0.09);
+  --jf-palette-starIcon-main: #f2b01e;
+  --jf-palette-SnackbarContent-bg: #303030;
+  --jf-palette-SnackbarContent-color: rgba(255, 255, 255, 0.87);
+  --jf-palette-Button-inheritContainedBg: rgba(0, 0, 0, 0.5);
+  --jf-palette-Button-inheritContainedHoverBg: rgba(0, 0, 0, 0.7);
+  --jf-card-borderRadius: 0.2em;
+  --jf-topbar-h: 64px;
+  --jf-font: "Noto Sans", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+[data-theme="purplehaze"] {
+  color-scheme: dark;
+  --jf-palette-background-default: #230c33;
+  --jf-palette-background-paper: #230c33;
+  --jf-palette-background-defaultImage: none;
+  --jf-palette-primary-main: #48c3c8;
+  --jf-palette-primary-dark: #2f9ea3;
+  --jf-palette-primary-light: #6ad4d8;
+  --jf-palette-secondary-main: #ff77f1;
+  --jf-palette-text-primary: #f8f8fe;
+  --jf-palette-text-secondary: rgba(248, 248, 254, 0.973);
+  --jf-palette-divider: rgba(255, 255, 255, 0.14);
+  --jf-palette-action-hover: #12122f;
+  --jf-palette-action-focus: rgba(0, 0, 0, 0.3);
+  --jf-palette-error-main: #c62828;
+  --jf-palette-error-light: #d15353;
+  --jf-palette-AppBar-defaultBg: #230c33;
+  --jf-palette-AppBar-transparentBg: rgba(0, 0, 0, 0.3);
+  --jf-palette-AppBar-gradient: linear-gradient(to right, #000420 0%, #06256f 18%, #2b052b 38%, #2b052b 68%, #06256f 81%, #000420 100%);
+  --jf-palette-FilledInput-bg: rgba(0, 0, 0, 0.5);
+  --jf-palette-starIcon-main: #f2b01e;
+  --jf-palette-SnackbarContent-bg: #303030;
+  --jf-palette-SnackbarContent-color: rgba(255, 255, 255, 0.87);
+  --jf-palette-Button-inheritContainedBg: rgba(0, 0, 0, 0.5);
+  --jf-palette-Button-inheritContainedHoverBg: #0ce8d6;
+  --jf-card-borderRadius: 0.8em;
+  --jf-topbar-h: 64px;
+  --jf-font: "Noto Sans", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+[data-theme="wmc"] {
+  color-scheme: dark;
+  --jf-palette-background-default: #0f3562;
+  --jf-palette-background-paper: #0c2450;
+  --jf-palette-background-defaultImage: linear-gradient(to bottom, #0f3562, #1162a4, #03215f);
+  --jf-palette-primary-main: #00a4dc;
+  --jf-palette-primary-dark: #00729a;
+  --jf-palette-primary-light: #33b6e3;
+  --jf-palette-secondary-main: #00a4dc;
+  --jf-palette-text-primary: #eee;
+  --jf-palette-text-secondary: rgba(255, 255, 255, 0.9);
+  --jf-palette-divider: rgba(255, 255, 255, 0.12);
+  --jf-palette-action-hover: rgba(0, 164, 220, 0.2);
+  --jf-palette-action-focus: #00a4dc;
+  --jf-palette-error-main: #c62828;
+  --jf-palette-error-light: #d15353;
+  --jf-palette-AppBar-defaultBg: #0c2450;
+  --jf-palette-AppBar-transparentBg: rgba(12, 36, 80, 0.86);
+  --jf-palette-AppBar-gradient: none;
+  --jf-palette-FilledInput-bg: rgba(255, 255, 255, 0.09);
+  --jf-palette-starIcon-main: #f2b01e;
+  --jf-palette-SnackbarContent-bg: #303030;
+  --jf-palette-SnackbarContent-color: rgba(255, 255, 255, 0.87);
+  --jf-palette-Button-inheritContainedBg: #082845;
+  --jf-palette-Button-inheritContainedHoverBg: #143451;
+  --jf-card-borderRadius: 0.2em;
+  --jf-topbar-h: 64px;
+  --jf-font: "Noto Sans", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* This client's original palette, kept selectable so the re-skin is reversible. */
+[data-theme="cinema"] {
+  color-scheme: dark;
+  --jf-palette-background-default: #0b0b0d;
+  --jf-palette-background-paper: #141417;
+  --jf-palette-background-defaultImage: none;
+  --jf-palette-primary-main: #e50914;
+  --jf-palette-primary-dark: #c40812;
+  --jf-palette-primary-light: #f6121d;
+  --jf-palette-secondary-main: #e50914;
+  --jf-palette-text-primary: #fff;
+  --jf-palette-text-secondary: #b9b9c1;
+  --jf-palette-divider: #2b2b31;
+  --jf-palette-action-hover: rgba(255, 255, 255, 0.07);
+  --jf-palette-action-focus: rgba(255, 255, 255, 0.12);
+  --jf-palette-error-main: #ff5c5c;
+  --jf-palette-error-light: #ff8080;
+  --jf-palette-AppBar-defaultBg: #141417;
+  --jf-palette-AppBar-transparentBg: rgba(0, 0, 0, 0.4);
+  --jf-palette-AppBar-gradient: none;
+  --jf-palette-FilledInput-bg: rgba(255, 255, 255, 0.06);
+  --jf-palette-starIcon-main: #f5c518;
+  --jf-palette-SnackbarContent-bg: #1b1b1f;
+  --jf-palette-SnackbarContent-color: #fff;
+  --jf-palette-Button-inheritContainedBg: #26262b;
+  --jf-palette-Button-inheritContainedHoverBg: #33333a;
+  --jf-card-borderRadius: 10px;
+  --jf-topbar-h: 68px;
+  --jf-font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ------------------------------------------------------- semantic bridge --- */
+/* One place derives the app's tokens from Jellyfin's palette, so every theme
+   above re-skins the whole stylesheet without touching individual rules.
+   `color-mix` keeps derived surfaces (hover rows, dividers) coherent in both
+   dark and light schemes instead of hard-coding a shade per theme. */
+
+:root {
+  --bg: var(--jf-palette-background-default);
+  --bg-deep: color-mix(in srgb, var(--jf-palette-background-default) 78%, #000);
+  --surface: var(--jf-palette-background-paper);
+  --surface-2: color-mix(in srgb, var(--jf-palette-background-paper) 92%, var(--jf-palette-text-primary));
+  --surface-3: color-mix(in srgb, var(--jf-palette-background-paper) 82%, var(--jf-palette-text-primary));
+  --border: var(--jf-palette-divider);
+  --border-soft: color-mix(in srgb, var(--jf-palette-divider) 45%, transparent);
+
+  --text: var(--jf-palette-text-primary);
+  --text-2: var(--jf-palette-text-secondary);
+  --text-3: color-mix(in srgb, var(--jf-palette-text-secondary) 62%, transparent);
+
+  --accent: var(--jf-palette-primary-main);
+  --accent-hover: var(--jf-palette-primary-light);
+  --accent-press: var(--jf-palette-primary-dark);
+  --accent-soft: color-mix(in srgb, var(--jf-palette-primary-main) 16%, transparent);
+
+  --gold: var(--jf-palette-starIcon-main);
+  --green: #46d369;
+  --danger: var(--jf-palette-error-main);
+
+  /* Cards follow Jellyfin's `--jf-card-borderRadius`; controls scale from it. */
+  --r-xs: 0.125rem;
+  --r-sm: var(--jf-card-borderRadius, 0.2em);
+  --r-md: calc(var(--jf-card-borderRadius, 0.2em) * 1.5);
+  --r-lg: calc(var(--jf-card-borderRadius, 0.2em) * 2.5);
+  --r-pill: 999px;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 6px 20px rgb(0 0 0 / 0.45);
+  --shadow-lg: 0 18px 50px rgb(0 0 0 / 0.55);
+
+  --font: var(--jf-font);
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --fast: 140ms var(--ease);
+  --slow: 320ms var(--ease);
+
+  --topbar-h: var(--jf-topbar-h, 68px);
+  --gutter: clamp(16px, 4vw, 60px);
+}
+
+/* Jellyfin renders a themed page background image/gradient; expose it so the
+   shell can honour schemes like WMC. `html body` outranks the `html, body`
+   shorthand in styles.css, which would otherwise reset background-image. */
+html body {
+  background-image: var(--jf-palette-background-defaultImage);
+  background-position: top center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-attachment: fixed;
+}
+
+/* Jellyfin's thin, low-contrast scrollbars. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-2) 40%, transparent) var(--surface);
+}

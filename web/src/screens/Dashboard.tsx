@@ -14,8 +14,9 @@ import type { Route } from "../router";
  */
 export function Dashboard({ go }: { go: (route: Route) => void }) {
   const { session } = useSession();
+  const isAdmin = session?.user.Policy.IsAdministrator ?? false;
   // Read-only here: the counts below, and nothing that mutates a library.
-  const { folders, scanning } = useLibraries();
+  const { folders, scanning } = useLibraries(isAdmin);
   const [sessions, setSessions] = useState<
     Array<{
       Id: string;
@@ -32,7 +33,7 @@ export function Dashboard({ go }: { go: (route: Route) => void }) {
   const [serverActionMessage, setServerActionMessage] = useState("");
 
   useEffect(() => {
-    if (!session?.user.Policy.IsAdministrator) return;
+    if (!isAdmin) return;
     api
       .sessions()
       .then((activeSessions) => {
@@ -43,7 +44,7 @@ export function Dashboard({ go }: { go: (route: Route) => void }) {
         setSessionsError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => setSessionsLoaded(true));
-  }, [session?.user.Policy.IsAdministrator]);
+  }, [isAdmin]);
 
   async function controlServer(action: "restart" | "shutdown") {
     const verb = action === "restart" ? "restart" : "shut down";
@@ -64,7 +65,7 @@ export function Dashboard({ go }: { go: (route: Route) => void }) {
     }
   }
 
-  if (!session?.user.Policy.IsAdministrator) {
+  if (!isAdmin || !session) {
     return (
       <main>
         <p className="error">The dashboard requires administrator access.</p>

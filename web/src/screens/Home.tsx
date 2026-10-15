@@ -27,7 +27,10 @@ export function Home({
 }) {
   const { session } = useSession();
   const userId = session?.user.Id ?? "";
-  const { folders, scanning, statuses, error } = useLibraries();
+  // Library and scan endpoints are administrator-only. A member still sees the
+  // home screen, so only request the admin data when they actually hold it.
+  const isAdmin = session?.user.Policy.IsAdministrator ?? false;
+  const { folders, scanning, statuses, error } = useLibraries(isAdmin);
 
   const [views, setViews] = useState<BaseItem[]>([]);
   const [viewsError, setViewsError] = useState("");
@@ -358,13 +361,17 @@ export function Home({
                 <p className="muted">
                   No libraries yet. Add a media folder to see your movies and shows here.
                 </p>
-                <button
-                  type="button"
-                  className="primary"
-                  onClick={() => go({ name: "dashboard" })}
-                >
-                  Open library settings
-                </button>
+                {/* Managing libraries is an administrator action; a member has
+                    nothing to do here and the link would only dead-end. */}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => go({ name: "dashboard" })}
+                  >
+                    Open library settings
+                  </button>
+                )}
               </section>
             )}
           </div>

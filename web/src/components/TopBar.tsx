@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSession } from "../App";
 import { api } from "../api/client";
 import { hrefFor, navigate, useRoute, type Route } from "../router";
+import { THEMES, useTheme } from "../theme";
 import type { BaseItem } from "../types";
 import { ChevronIcon, DashboardIcon, KeyIcon, ShelvesIcon, SignOutIcon, UsersIcon } from "./icons";
 
@@ -16,6 +17,7 @@ import { ChevronIcon, DashboardIcon, KeyIcon, ShelvesIcon, SignOutIcon, UsersIco
 export function TopBar() {
   const { session, logout } = useSession();
   const [route] = useRoute();
+  const [theme, setTheme] = useTheme();
   const [term, setTerm] = useState("");
   const [scrolled, setScrolled] = useState(false);
   const [views, setViews] = useState<BaseItem[]>([]);
@@ -141,15 +143,19 @@ export function TopBar() {
       />
 
       <div className="topbar-actions">
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="API keys"
-          title="API keys"
-          onClick={() => navigate({ name: "api-keys" })}
-        >
-          <KeyIcon />
-        </button>
+        {/* Server-side API keys are administrator-only, so the shortcut is
+            hidden for members rather than dead-ending on a refusal. */}
+        {session?.user.Policy.IsAdministrator && (
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="API keys"
+            title="API keys"
+            onClick={() => navigate({ name: "api-keys" })}
+          >
+            <KeyIcon />
+          </button>
+        )}
 
         <div className="profile" ref={profileRef}>
           <button
@@ -175,6 +181,22 @@ export function TopBar() {
                   {serverName}
                 </span>
               </div>
+
+              <label className="profile-theme">
+                <span>Theme</span>
+                <select
+                  aria-label="Theme"
+                  value={theme}
+                  onChange={(event) => setTheme(event.target.value)}
+                >
+                  {THEMES.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
               {session?.user.Policy.IsAdministrator && (
                 <button
                   type="button"
@@ -214,17 +236,19 @@ export function TopBar() {
                   Users
                 </button>
               )}
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setMenuOpen(false);
-                  navigate({ name: "api-keys" });
-                }}
-              >
-                <KeyIcon />
-                API keys
-              </button>
+              {session?.user.Policy.IsAdministrator && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    navigate({ name: "api-keys" });
+                  }}
+                >
+                  <KeyIcon />
+                  API keys
+                </button>
+              )}
               <button
                 type="button"
                 role="menuitem"

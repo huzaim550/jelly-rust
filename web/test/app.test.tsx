@@ -365,3 +365,68 @@ describe("dashboard", () => {
     expect(screen.getByText("5h 0m left")).toBeInTheDocument();
   });
 });
+
+/** A signed-in member, for the administrator-only paths. */
+const VIEWER = {
+  ...ADMIN_USER,
+  Id: "user-2",
+  Name: "bob",
+  HasPassword: false,
+  Policy: { ...ADMIN_USER.Policy, IsAdministrator: false },
+};
+
+/** A member's session, with their own item routes rather than the admin's. */
+function seedViewer(fake: FakeServer) {
+  seedAdmin(fake);
+  fake.on("GET", "/Users/Me", VIEWER);
+  for (const path of [
+    `/Users/${VIEWER.Id}/Views`,
+    `/Users/${VIEWER.Id}/Items/Resume`,
+    `/Users/${VIEWER.Id}/Items`,
+    `/Users/${VIEWER.Id}/Shows/NextUp`,
+  ]) {
+    fake.on("GET", path, { Items: [], TotalRecordCount: 0, StartIndex: 0 });
+  }
+}
+
+describe("member access", () => {
+  beforeEach(() => {
+    setStoredToken("stored-token");
+  });
+
+  it("never shows the administrator library error on a member's home page", async () => {
+    seedViewer(server);
+
+    render(<App />);
+
+    // The home screen itself renders for the member…
+    expect(await screen.findByText(/start building your library/i)).toBeInTheDocument();
+    // …and neither the error nor the requests that cause it appear.
+    expect(screen.queryByText(/requires administrator access/i)).not.toBeInTheDocument();
+    expect(server.calls.some((call) => call.path === "/Library/VirtualFolders")).toBe(false);
+    expect(server.calls.some((call) => call.path === "/Library/ScanStatus")).toBe(false);
+  });
+
+  it("hides the API keys entry point from a member", async () => {
+    seedViewer(server);
+
+    render(<App />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: /open navigation menu/i }));
+    expect(screen.queryByRole("button", { name: /api keys/i })).not.toBeInTheDocument();
+  });
+
+  it("refuses the API keys screen when a member enters its URL directly", async () => {
+    window.history.replaceState({}, "", "/settings/api-keys");
+    seedViewer(server);
+
+    render(<App />);
+
+    expect(
+      await screen.findByText(/api key management requires administrator access/i),
+    ).toBeInTheDocument();
+    // The server-wide configuration must not even be queried.
+    expect(server.calls.some((call) => call.path === "/Plugins/omdb/Configuration")).toBe(false);
+  });
+});

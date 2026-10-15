@@ -1,10 +1,20 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#0b0b0d" />
+    <meta name="theme-color" content="#101010" />
+    <script>
+      // Apply a stored theme before first paint so switching schemes does not
+      // flash the default. Kept inline and dependency-free on purpose.
+      try {
+        var stored = localStorage.getItem("jf.theme");
+        if (stored) document.documentElement.dataset.theme = stored;
+      } catch (error) {
+        /* storage unavailable; the default attribute stands */
+      }
+    </script>
     <meta
       name="description"
       content="A self-hosted media server for your films, series, and music."

@@ -125,12 +125,16 @@ export function Sidebar({ route }: { route: Route }) {
               onClick={() => navigate({ name: "libraries" })}
             />
           )}
-          <SidebarLink
-            label="API Keys"
-            icon={<KeyIcon />}
-            selected={active({ name: "api-keys" })}
-            onClick={() => navigate({ name: "api-keys" })}
-          />
+          {/* Server-side API keys are administrator-only; exposing the entry
+              point to a member only offers actions the server will reject. */}
+          {session?.user.Policy.IsAdministrator && (
+            <SidebarLink
+              label="API Keys"
+              icon={<KeyIcon />}
+              selected={active({ name: "api-keys" })}
+              onClick={() => navigate({ name: "api-keys" })}
+            />
+          )}
         </div>
         {viewsError && (
           <p className="sidebar-error" role="status">

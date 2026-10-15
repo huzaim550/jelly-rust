@@ -40,22 +40,33 @@ export function libraryIcon(collectionType: string | null): string {
   return found?.icon ?? "📁";
 }
 
-export function useLibraries() {
+/**
+ * Library and scan state.
+ *
+ * `/Library/VirtualFolders` and `/Library/ScanStatus` are administrator-only on
+ * the server, so `enabled` must be false for a normal member: otherwise every
+ * visit to the home screen fires two requests that 403 and surfaces
+ * "Managing libraries requires administrator access." at the top of a page the
+ * member is perfectly entitled to see.
+ */
+export function useLibraries(enabled = true) {
   const [folders, setFolders] = useState<VirtualFolder[]>([]);
   const [scanning, setScanning] = useState(false);
   const [statuses, setStatuses] = useState<Record<string, ScanStatus>>({});
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
+    if (!enabled) return;
     try {
       setFolders(await api.virtualFolders());
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, []);
+  }, [enabled]);
 
   const pollStatus = useCallback(async () => {
+    if (!enabled) return;
     try {
       const status = await api.scanStatus();
       setScanning(status.scanning);
@@ -63,7 +74,7 @@ export function useLibraries() {
     } catch {
       // A transient failure here must not break the page; the next poll retries.
     }
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
     void refresh();

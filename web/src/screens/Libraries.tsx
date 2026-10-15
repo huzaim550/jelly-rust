@@ -13,9 +13,10 @@ import type { Route } from "../router";
  */
 export function Libraries({ go }: { go: (route: Route) => void }) {
   const { session } = useSession();
-  const { folders, scanning, statuses, remove, rescan, refresh, error } = useLibraries();
+  const isAdmin = session?.user.Policy.IsAdministrator ?? false;
+  const { folders, scanning, statuses, remove, rescan, refresh, error } = useLibraries(isAdmin);
 
-  if (!session?.user.Policy.IsAdministrator) {
+  if (!isAdmin) {
     return (
       <main>
         <p className="error">Library management requires administrator access.</p>

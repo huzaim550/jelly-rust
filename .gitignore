@@ -1,5 +1,8 @@
 jellyfin/
 
+# Upstream reference source (read-only study material, not part of the build)
+/reference/
+
 # Phase 0 spike scratch
 /spikes/
 /target/

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "../App";
 import { api } from "../api/client";
 import { itemSubtitle, initials, PosterRail } from "../components/ItemCard";
+import { InfoIcon, PlayIcon } from "../components/icons";
 import { libraryLabel, useLibraries } from "../library";
 import type { BaseItem } from "../types";
 import type { Route } from "../router";
@@ -36,6 +37,7 @@ export function Home({
   const [catalogError, setCatalogError] = useState("");
   const [loading, setLoading] = useState(true);
   const [slideIndexRaw, setSlideIndexRaw] = useState(0);
+  const [paused, setPaused] = useState(false);
 
   useEffect(() => {
     if (!userId) return;
@@ -128,6 +130,17 @@ export function Home({
     setSlideIndexRaw((slideIndex + direction + slides.length) % slides.length);
   }
 
+  // Rotate the banner every so often, unless the viewer is interacting with it
+  // or has asked for reduced motion.
+  useEffect(() => {
+    if (paused || slides.length <= 1) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    const timer = window.setInterval(() => {
+      setSlideIndexRaw((prev) => (Math.min(prev, slides.length - 1) + 1) % slides.length);
+    }, 9000);
+    return () => window.clearInterval(timer);
+  }, [paused, slides.length]);
+
   if (loading && folders.length === 0) {
     return <p className="muted loading">Loading…</p>;
   }
@@ -143,10 +156,16 @@ export function Home({
       ) : (
         <div className="home-layout">
           {featured && (
-            <section className="hero-banner" aria-label={`Featured: ${featured.Name}`}>
+            <section
+              className="hero-banner"
+              aria-label={`Featured: ${featured.Name}`}
+              onMouseEnter={() => setPaused(true)}
+              onMouseLeave={() => setPaused(false)}
+            >
               <div className="hero-banner-art">
                 {featuredImageUrl && (
                   <img
+                    key={featured.Id}
                     src={featuredImageUrl}
                     alt=""
                     fetchPriority="high"
@@ -199,7 +218,12 @@ export function Home({
                 <div className="hero-banner-meta">
                   {itemSubtitle(featured) && <span>{itemSubtitle(featured)}</span>}
                   {featured.CommunityRating != null && featured.CommunityRating > 0 && (
-                    <span className="hero-banner-rating">★ {featured.CommunityRating.toFixed(1)}</span>
+                    <>
+                      <span className="hero-banner-match">
+                        {Math.round(featured.CommunityRating * 10)}% Match
+                      </span>
+                      <span className="hero-banner-rating">★ {featured.CommunityRating.toFixed(1)}</span>
+                    </>
                   )}
                   {featured.OfficialRating && (
                     <span className="hero-banner-cert">{featured.OfficialRating}</span>
@@ -216,13 +240,15 @@ export function Home({
                     className="home-watch-button"
                     onClick={() => playItem(featured)}
                   >
-                    <span aria-hidden="true">▶</span> Watch Now
+                    <PlayIcon />
+                    Watch Now
                   </button>
                   <button
                     type="button"
                     className="home-info-button"
                     onClick={() => openItem(featured)}
                   >
+                    <InfoIcon />
                     More info
                   </button>
                 </div>

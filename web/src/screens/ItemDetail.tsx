@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "../App";
 import { api, ApiError } from "../api/client";
 import { PosterRail, formatDuration, itemSubtitle } from "../components/ItemCard";
+import { HeartIcon, PlayIcon } from "../components/icons";
 import type { BaseItem } from "../types";
 import type { Route } from "../router";
 
@@ -191,7 +192,8 @@ export function ItemDetail({
                   className="primary detail-play"
                   onClick={() => onPlay({ itemId: item.Id, title: item.Name })}
                 >
-                  <span aria-hidden="true">▶</span> Play
+                  <PlayIcon />
+                  Play
                 </button>
                 <button
                   type="button"
@@ -200,7 +202,7 @@ export function ItemDetail({
                   disabled={favoriteBusy}
                   aria-pressed={isFavorite}
                 >
-                  <span aria-hidden="true">{isFavorite ? "♥" : "♡"}</span>
+                  <HeartIcon filled={isFavorite} />
                   {isFavorite ? "In favourites" : "Add to favourites"}
                 </button>
               </div>

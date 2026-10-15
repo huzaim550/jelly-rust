@@ -142,10 +142,25 @@ export const ADMIN_USER = {
   PrimaryImageTag: null,
   HasPassword: true,
   Policy: {
-    IsAdministrator: true,
-    EnableMediaPlayback: true,
     EnableAllFolders: true,
     EnabledFolders: [],
+    EnableMediaPlayback: true,
+    EnableAudioPlaybackTranscoding: true,
+    EnableVideoPlaybackTranscoding: true,
+    EnablePlaybackRemuxing: true,
+    EnableContentDeletion: true,
+    EnableContentDownloading: true,
+    EnableSyncTranscoding: true,
+    EnableMediaStreamEditing: false,
+    IsAdministrator: true,
+    IsHidden: false,
+    IsDisabled: false,
+    EnableLiveTvManagement: false,
+    EnableLiveTvAccess: false,
+    MaxActiveSessions: 0,
+    AuthenticationProviderId: "Default",
+    PasswordResetProviderId: "Default",
+    SyncPlayAccess: "CreateAndJoinGroups",
   },
 };
 
@@ -172,6 +187,7 @@ export function seedAdmin(server: FakeServer, extra: { users?: unknown[] } = {})
   server.on("GET", "/Sessions", []);
   server.on("POST", "/System/Restart", undefined, 202);
   server.on("POST", "/System/Shutdown", undefined, 202);
+  server.on("GET", "/Users", extra.users ?? [ADMIN_USER]);
   server.on("GET", "/Users/Public", {
     ServerId: "server-1",
     ServerName: "Test Server",

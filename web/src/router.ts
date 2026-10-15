@@ -12,6 +12,8 @@ import { useCallback, useEffect, useState } from "react";
 export type Route =
   | { name: "home" }
   | { name: "dashboard" }
+  | { name: "libraries" }
+  | { name: "users" }
   | { name: "api-keys" }
   | { name: "library"; viewId: string }
   | { name: "item"; itemId: string }
@@ -26,6 +28,14 @@ export function parseLocation(pathname: string, search: string): Route {
   if (segments[0] === "library" && segments[1]) return { name: "library", viewId: segments[1] };
   if (segments[0] === "item" && segments[1]) return { name: "item", itemId: segments[1] };
   if (segments[0] === "dashboard") return { name: "dashboard" };
+  // Library *management* lives under /settings so it cannot be confused with
+  // /library/:id, which is browsing one library's contents.
+  if (segments[0] === "settings" && segments[1] === "libraries") {
+    return { name: "libraries" };
+  }
+  if (segments[0] === "settings" && segments[1] === "users") {
+    return { name: "users" };
+  }
   if (segments[0] === "settings" && segments[1] === "api-keys") {
     return { name: "api-keys" };
   }
@@ -39,6 +49,10 @@ export function hrefFor(route: Route): string {
       return "/";
     case "dashboard":
       return "/dashboard";
+    case "libraries":
+      return "/settings/libraries";
+    case "users":
+      return "/settings/users";
     case "api-keys":
       return "/settings/api-keys";
     case "library":

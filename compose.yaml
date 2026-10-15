@@ -6,7 +6,7 @@ services:
       - "8096:8096"
     volumes:
       - jelly-rust-data:/data
-      - ./media:/media:ro
+      - /mnt/media:/mnt/media:ro
     restart: unless-stopped
 
 volumes:

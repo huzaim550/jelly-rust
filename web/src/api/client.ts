@@ -13,6 +13,8 @@ import type {
   PublicSystemInfo,
   PublicUsers,
   QueryResult,
+  User,
+  UserPolicy,
 } from "../types";
 
 const TOKEN_KEY = "jf.token";
@@ -233,6 +235,59 @@ export const api = {
 
   me(): Promise<import("../types").User> {
     return request("GET", "/Users/Me");
+  },
+
+  // --------------------------------------------------------------- user admin
+
+  /** Every account, administrators included. Administrator-only on the server. */
+  users(): Promise<User[]> {
+    return request("GET", "/Users");
+  },
+
+  /**
+   * Create an account.
+   *
+   * `password` is omitted rather than sent empty so a passwordless account is
+   * created the same way the wizard creates the first administrator.
+   */
+  createUser(name: string, password: string, isAdministrator: boolean): Promise<User> {
+    return request("POST", "/Users/New", {
+      body: {
+        Name: name,
+        Password: password || undefined,
+        IsAdministrator: isAdministrator,
+      },
+    });
+  },
+
+  deleteUser(userId: string): Promise<void> {
+    return request("DELETE", `/Users/${userId}`);
+  },
+
+  /** Replace a user's whole policy. The server rejects leaving no administrator. */
+  updateUserPolicy(userId: string, policy: UserPolicy): Promise<void> {
+    return request("POST", `/Users/${userId}/Policy`, { body: policy });
+  },
+
+  /**
+   * Set or clear a password.
+   *
+   * `newPassword === null` clears it (passwordless account); otherwise it is
+   * set. `currentPassword` is required when a non-administrator changes their
+   * own, and ignored when an administrator resets somebody else's.
+   */
+  setUserPassword(
+    userId: string,
+    newPassword: string | null,
+    currentPassword?: string,
+  ): Promise<void> {
+    return request("POST", `/Users/${userId}/Password`, {
+      body: {
+        CurrentPw: currentPassword,
+        NewPw: newPassword ?? undefined,
+        ResetPassword: newPassword === null,
+      },
+    });
   },
 
   // ----------------------------------------------------------------- library

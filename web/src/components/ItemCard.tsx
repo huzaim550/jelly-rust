@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { api } from "../api/client";
 import type { BaseItem } from "../types";
+import { PlayIcon } from "./icons";
 
 /**
  * Up to two initials for an avatar.
@@ -116,34 +117,37 @@ export function ItemCard({
 
   return (
     <div className="card item">
-      <button type="button" className="poster-button" onClick={onOpen}>
-        {hasPoster(item) ? (
-          <div className="poster">
-            <img src={posterUrl(item)} alt="" loading="lazy" />
-          </div>
-        ) : (
-          <div className="poster placeholder">{item.Type}</div>
-        )}
-        {progress > 0 && progress < 0.98 && (
-          <div className="progress" style={{ width: `${progress * 100}%` }} />
-        )}
-        {remaining && <span className="remaining-badge">{remaining} left</span>}
-      </button>
-
-      {showPlayOverlay && (
-        <button
-          type="button"
-          className="overlay-play"
-          aria-label={`Play ${item.Name}`}
-          onClick={(event) => {
-            // The tile itself is also clickable; don't double-fire.
-            event.stopPropagation();
-            onPlay();
-          }}
-        >
-          ▶
+      <div className="poster-frame">
+        <button type="button" className="poster-button" onClick={onOpen}>
+          {hasPoster(item) ? (
+            <div className="poster">
+              <img src={posterUrl(item)} alt="" loading="lazy" />
+              <span className="poster-shade" aria-hidden="true" />
+            </div>
+          ) : (
+            <div className="poster placeholder">{item.Type}</div>
+          )}
+          {progress > 0 && progress < 0.98 && (
+            <div className="progress" style={{ width: `${progress * 100}%` }} />
+          )}
+          {remaining && <span className="remaining-badge">{remaining} left</span>}
         </button>
-      )}
+
+        {showPlayOverlay && (
+          <button
+            type="button"
+            className="overlay-play"
+            aria-label={`Play ${item.Name}`}
+            onClick={(event) => {
+              // The tile itself is also clickable; don't double-fire.
+              event.stopPropagation();
+              onPlay();
+            }}
+          >
+            <PlayIcon />
+          </button>
+        )}
+      </div>
 
       <button type="button" className="meta" onClick={onOpen}>
         <span className="title">{item.Name}</span>

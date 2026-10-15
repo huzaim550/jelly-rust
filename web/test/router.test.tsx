@@ -34,6 +34,8 @@ describe("route parsing", () => {
     const routes = [
       { name: "home" },
       { name: "dashboard" },
+      { name: "libraries" },
+      { name: "users" },
       { name: "api-keys" },
       { name: "library", viewId: "lib-1" },
       { name: "item", itemId: "item-1" },
@@ -96,6 +98,19 @@ describe("in-app navigation", () => {
 
     await waitFor(() => expect(screen.getByText("My Libraries")).toBeInTheDocument());
     expect(window.location.pathname).toBe("/");
+  });
+
+  it("opens user management from the sidebar", async () => {
+    seedAdmin(server);
+    render(<App />);
+    const user = userEvent.setup();
+
+    await screen.findByText("My Libraries");
+    await user.click(screen.getByRole("button", { name: /open navigation menu/i }));
+    await user.click(screen.getByRole("button", { name: /^users$/i }));
+
+    expect(await screen.findByRole("heading", { name: /^users$/i })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/settings/users");
   });
 
   it("opens a library tile on that library's page", async () => {

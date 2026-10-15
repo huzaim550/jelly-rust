@@ -12,6 +12,7 @@ pub mod next_up;
 pub mod routes;
 pub mod scans;
 pub mod state;
+pub mod users;
 
 use axum::routing::{delete, get, post};
 use axum::Router;
@@ -193,6 +194,11 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/Sessions", get(routes::sessions))
         .route("/Users/{userId}/Policy", post(routes::update_policy))
         .route("/Users/{userId}/Configuration", post(routes::update_configuration))
+        // User administration
+        .route("/Users", get(users::list_users))
+        .route("/Users/New", post(users::create_user))
+        .route("/Users/{userId}", delete(users::delete_user))
+        .route("/Users/{userId}/Password", post(users::update_password))
         // Library
         .route("/Users/{userId}/Views", get(routes::user_views))
         .route("/Users/{userId}/Items/Resume", get(routes::resume_items))

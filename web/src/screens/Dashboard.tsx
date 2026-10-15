@@ -1,19 +1,21 @@
 import { useEffect, useState } from "react";
 import { useSession } from "../App";
 import { api } from "../api/client";
-import { libraryIcon, useLibraries } from "../library";
-import { LibraryPicker } from "./Welcome";
+import { useLibraries } from "../library";
 import type { Route } from "../router";
 
 /**
- * Library and plugin administration, reachable from the top bar.
+ * Server overview: identity, control and health, reachable from the top bar.
  *
- * Admin-only in the UI, and the server enforces that too — a hidden route is
- * not the security boundary, so every handler here re-checks the policy.
+ * Library *management* lives on its own screen (`/settings/libraries`) so this
+ * page stays read-only. Admin-only in the UI, and the server enforces that too
+ * — a hidden route is not the security boundary, so every handler here
+ * re-checks the policy.
  */
-export function LibrarySettings({ go }: { go: (route: Route) => void }) {
+export function Dashboard({ go }: { go: (route: Route) => void }) {
   const { session } = useSession();
-  const { folders, scanning, statuses, remove, rescan, refresh, error } = useLibraries();
+  // Read-only here: the counts below, and nothing that mutates a library.
+  const { folders, scanning } = useLibraries();
   const [sessions, setSessions] = useState<
     Array<{
       Id: string;
@@ -65,7 +67,7 @@ export function LibrarySettings({ go }: { go: (route: Route) => void }) {
   if (!session?.user.Policy.IsAdministrator) {
     return (
       <main>
-        <p className="error">Library settings require administrator access.</p>
+        <p className="error">The dashboard requires administrator access.</p>
       </main>
     );
   }
@@ -94,9 +96,6 @@ export function LibrarySettings({ go }: { go: (route: Route) => void }) {
           </section>
 
           <div className="dashboard-actions">
-            <button type="button" className="primary" onClick={() => void rescan()} disabled={scanning}>
-              {scanning ? "Scanning libraries…" : "Scan all libraries"}
-            </button>
             <button
               type="button"
               className="danger-button"
@@ -138,61 +137,11 @@ export function LibrarySettings({ go }: { go: (route: Route) => void }) {
             </div>
           </div>
 
-          <section>
-            <div className="section-head">
-              <h2>Libraries</h2>
-              <div className="row-actions">
-                <button type="button" className="link" onClick={() => void refresh()}>
-                  Refresh
-                </button>
-              </div>
-            </div>
-
-            {error && <p className="error">{error}</p>}
-
-            {folders.length === 0 && !scanning && (
-              <p className="muted">No libraries yet. Add one below.</p>
-            )}
-
-            {folders.map((folder) => {
-              const status = statuses[folder.ItemId];
-              return (
-                <div key={folder.ItemId} className="library-row">
-                  <span className="icon">{libraryIcon(folder.CollectionType)}</span>
-                  <div className="info">
-                    <div className="name">{folder.Name}</div>
-                    <div className="muted small path">{folder.Locations.join(", ")}</div>
-                    {status?.state === "Scanning" && (
-                      <>
-                        <div className="bar slim">
-                          <div
-                            className="fill"
-                            style={{ width: `${Math.round((status.progress ?? 0) * 100)}%` }}
-                          />
-                        </div>
-                        <div className="muted small">
-                          {Math.round((status.progress ?? 0) * 100)}% · {status.processed} files
-                        </div>
-                      </>
-                    )}
-                    {status?.detail && <div className="muted small">{status.detail}</div>}
-                  </div>
-                  <button
-                    type="button"
-                    className="link danger"
-                    onClick={() => void remove(folder.Name)}
-                  >
-                    Remove
-                  </button>
-                </div>
-              );
-            })}
-          </section>
-
-          <section>
-            <h2>Add a library</h2>
-            <LibraryPicker onAdded={() => void refresh()} />
-          </section>
+          <p className="dashboard-manage">
+            <button type="button" className="link" onClick={() => go({ name: "libraries" })}>
+              Manage libraries →
+            </button>
+          </p>
 
           <section>
             <h2>Plugins</h2>

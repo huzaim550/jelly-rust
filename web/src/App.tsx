@@ -8,7 +8,9 @@ import { TopBar } from "./components/TopBar";
 import { Login } from "./screens/Login";
 import { Home } from "./screens/Home";
 import { Welcome } from "./screens/Welcome";
-import { LibrarySettings } from "./screens/Dashboard";
+import { Dashboard } from "./screens/Dashboard";
+import { Libraries } from "./screens/Libraries";
+import { Users } from "./screens/Users";
 import { Library } from "./screens/Library";
 import { ItemDetail } from "./screens/ItemDetail";
 import { Player } from "./screens/Player";
@@ -130,6 +132,11 @@ export function App() {
     [session, status, error, login, logout],
   );
 
+  // Keep the tab label in step with whichever server this client is pointed at.
+  useEffect(() => {
+    document.title = server?.ServerName ? `${server.ServerName}` : "jellyfin-clone";
+  }, [server]);
+
   if (status === "loading") {
     return (
       <div className="centered">
@@ -170,6 +177,10 @@ export function App() {
     );
   }
 
+  // Screens that keep the sidebar docked beside the workspace, rather than
+  // collapsing it behind the home hamburger.
+  const docked = route.name === "dashboard" || route.name === "libraries" || route.name === "users";
+
   return (
     <AppContext.Provider value={context}>
       {playing ? (
@@ -185,10 +196,10 @@ export function App() {
       ) : (
         <div
           className={`app-shell${route.name === "home" ? " app-shell-home" : ""}${
-            route.name === "dashboard" ? " app-shell-dashboard" : ""
+            docked ? " app-shell-dashboard" : ""
           }`}
         >
-          {(route.name === "home" || route.name === "dashboard") && <Sidebar route={route} />}
+          {(route.name === "home" || docked) && <Sidebar route={route} />}
           <div className="app-workspace">
             <TopBar />
             <Screen route={route} go={go} onPlay={startPlayback} />
@@ -210,7 +221,11 @@ function Screen({ route, go, onPlay }: ScreenProps) {
     case "home":
       return <Home go={go} onPlay={onPlay} />;
     case "dashboard":
-      return <LibrarySettings go={go} />;
+      return <Dashboard go={go} />;
+    case "libraries":
+      return <Libraries go={go} />;
+    case "users":
+      return <Users go={go} />;
     case "api-keys":
       return <ApiKeys />;
     case "library":

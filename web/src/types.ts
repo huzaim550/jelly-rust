@@ -20,11 +20,36 @@ export type ItemType =
   | "UserView"
   | "CollectionFolder";
 
+/**
+ * Per-user access policy.
+ *
+ * Modelled in full, including fields this client never edits, because
+ * `POST /Users/{id}/Policy` replaces the whole object and the server's
+ * deserializer rejects a partial body. Editing therefore spreads the policy
+ * that came back from the server and overrides only the fields on screen.
+ */
 export interface UserPolicy {
-  IsAdministrator: boolean;
-  EnableMediaPlayback: boolean;
   EnableAllFolders: boolean;
   EnabledFolders: string[];
+  EnableMediaPlayback: boolean;
+  EnableAudioPlaybackTranscoding: boolean;
+  EnableVideoPlaybackTranscoding: boolean;
+  EnablePlaybackRemuxing: boolean;
+  EnableContentDeletion: boolean;
+  EnableContentDownloading: boolean;
+  EnableSyncTranscoding: boolean;
+  EnableMediaStreamEditing: boolean;
+  IsAdministrator: boolean;
+  IsHidden: boolean;
+  /** Blocks sign-in and invalidates existing sessions. */
+  IsDisabled: boolean;
+  EnableLiveTvManagement: boolean;
+  EnableLiveTvAccess: boolean;
+  /** Zero means no ceiling on concurrent sessions. */
+  MaxActiveSessions: number;
+  AuthenticationProviderId: string;
+  PasswordResetProviderId: string;
+  SyncPlayAccess: string;
 }
 
 export interface User {

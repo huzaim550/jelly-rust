@@ -275,6 +275,21 @@ pub async fn update_policy(
         return Err(ApiError::forbidden("You cannot grant yourself administrator access."));
     }
 
+    // Demoting or disabling the last usable administrator cannot be undone from
+    // inside the application, so it is refused outright.
+    let target = app
+        .db
+        .user(&user_id)
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::not_found("No such user."))?;
+
+    let was_active_admin = target.policy.is_administrator && !target.policy.is_disabled;
+    let stays_active_admin = policy.is_administrator && !policy.is_disabled;
+    if was_active_admin && !stays_active_admin {
+        crate::users::ensure_admin_remains(&app, &user_id).await?;
+    }
+
     app.db.update_policy(&user_id, &policy).await.map_err(ApiError::from)?;
     Ok(StatusCode::NO_CONTENT)
 }

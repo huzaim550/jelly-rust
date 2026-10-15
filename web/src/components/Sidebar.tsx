@@ -3,7 +3,14 @@ import { useSession } from "../App";
 import { api } from "../api/client";
 import { navigate, type Route } from "../router";
 import type { BaseItem } from "../types";
+import { CompassIcon, DashboardIcon, KeyIcon, LibraryIcon, ShelvesIcon, UsersIcon } from "./icons";
 
+/**
+ * Primary navigation.
+ *
+ * On the admin screens it stays docked beside the workspace; on the home screen
+ * it collapses behind a hamburger so the hero owns the full width.
+ */
 export function Sidebar({ route }: { route: Route }) {
   const { session } = useSession();
   const userId = session?.user.Id ?? "";
@@ -72,33 +79,11 @@ export function Sidebar({ route }: { route: Route }) {
       </button>
 
       <nav aria-label="Main navigation">
-        {session?.user.Policy.IsAdministrator && (
-          <div className="sidebar-group">
-            <span className="sidebar-label">Server</span>
-            <SidebarLink
-              label="Dashboard"
-              icon="▦"
-              selected={active({ name: "dashboard" })}
-              onClick={() => navigate({ name: "dashboard" })}
-            />
-          </div>
-        )}
-
         <div className="sidebar-group">
-          <span className="sidebar-label">Account</span>
-          <SidebarLink
-            label="API Keys"
-            icon="⚿"
-            selected={active({ name: "api-keys" })}
-            onClick={() => navigate({ name: "api-keys" })}
-          />
-        </div>
-
-        <div className="sidebar-group">
-          <span className="sidebar-label">Media</span>
+          <span className="sidebar-label">Browse</span>
           <SidebarLink
             label="Browse"
-            icon="▤"
+            icon={<CompassIcon />}
             selected={active({ name: "home" })}
             onClick={() => navigate({ name: "home" })}
           />
@@ -106,14 +91,52 @@ export function Sidebar({ route }: { route: Route }) {
             <SidebarLink
               key={view.Id}
               label={view.Name}
-              icon="▣"
+              icon={<LibraryIcon />}
               nested
               selected={active({ name: "library", viewId: view.Id })}
               onClick={() => navigate({ name: "library", viewId: view.Id })}
             />
           ))}
         </div>
-        {viewsError && <p className="sidebar-error" role="status">{viewsError}</p>}
+
+        <div className="sidebar-group">
+          <span className="sidebar-label">Account</span>
+          {session?.user.Policy.IsAdministrator && (
+            <>
+              <SidebarLink
+                label="Dashboard"
+                icon={<DashboardIcon />}
+                selected={active({ name: "dashboard" })}
+                onClick={() => navigate({ name: "dashboard" })}
+              />
+              <SidebarLink
+                label="Users"
+                icon={<UsersIcon />}
+                selected={active({ name: "users" })}
+                onClick={() => navigate({ name: "users" })}
+              />
+            </>
+          )}
+          {session?.user.Policy.IsAdministrator && (
+            <SidebarLink
+              label="Libraries"
+              icon={<ShelvesIcon />}
+              selected={active({ name: "libraries" })}
+              onClick={() => navigate({ name: "libraries" })}
+            />
+          )}
+          <SidebarLink
+            label="API Keys"
+            icon={<KeyIcon />}
+            selected={active({ name: "api-keys" })}
+            onClick={() => navigate({ name: "api-keys" })}
+          />
+        </div>
+        {viewsError && (
+          <p className="sidebar-error" role="status">
+            {viewsError}
+          </p>
+        )}
       </nav>
 
       <div className="sidebar-account">
@@ -164,7 +187,7 @@ function SidebarLink({
   onClick,
 }: {
   label: string;
-  icon: string;
+  icon: React.ReactNode;
   selected: boolean;
   nested?: boolean;
   onClick: () => void;

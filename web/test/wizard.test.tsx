@@ -182,9 +182,9 @@ describe("library admin", () => {
     const user = userEvent.setup();
     await screen.findByText("My Libraries");
     await user.click(screen.getByRole("button", { name: /open navigation menu/i }));
-    await user.click(screen.getByRole("button", { name: /dashboard/i }));
+    await user.click(screen.getByRole("button", { name: /^libraries$/i }));
 
-    expect(await screen.findByRole("heading", { name: /^dashboard$/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /^libraries$/i })).toBeInTheDocument();
 
     const pathInput = await screen.findByLabelText(/folder on this server/i);
     await user.click(screen.getByText(/browse the server/i));
@@ -207,7 +207,7 @@ describe("library admin", () => {
     const user = userEvent.setup();
     await screen.findByText("My Libraries");
     await user.click(screen.getByRole("button", { name: /open navigation menu/i }));
-    await user.click(screen.getByRole("button", { name: /dashboard/i }));
+    await user.click(screen.getByRole("button", { name: /^libraries$/i }));
 
     const add = await screen.findByRole("button", { name: /add library/i });
     await user.click(add);
@@ -223,7 +223,7 @@ describe("library admin", () => {
     const user = userEvent.setup();
     await screen.findByText("My Libraries");
     await user.click(screen.getByRole("button", { name: /open navigation menu/i }));
-    await user.click(screen.getByRole("button", { name: /dashboard/i }));
+    await user.click(screen.getByRole("button", { name: /^libraries$/i }));
 
     await user.click(await screen.findByRole("button", { name: /scan all/i }));
 
@@ -252,5 +252,6 @@ describe("library admin", () => {
 
     // The server would reject this too; the client simply does not offer it.
     expect(screen.queryByRole("button", { name: /dashboard/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^libraries$/i })).not.toBeInTheDocument();
   });
 });

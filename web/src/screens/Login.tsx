@@ -55,8 +55,18 @@ export function Login({ serverName }: { serverName: string }) {
   return (
     <div className="centered">
       <form className="card login" onSubmit={submit}>
-        <h1>{serverName}</h1>
-        <p className="muted">Sign in</p>
+        <div className="login-brand">
+          <span className="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 28 28">
+              <path d="M5 8.5 14 3l9 5.5v11L14 25l-9-5.5z" />
+              <path d="m11 9 7 5-7 5z" />
+            </svg>
+          </span>
+          <strong>{serverName}</strong>
+        </div>
+
+        <h1>Welcome back</h1>
+        <p className="muted">Sign in to keep watching.</p>
 
         <label htmlFor="username">Username</label>
         <input

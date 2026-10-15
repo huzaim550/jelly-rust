@@ -432,6 +432,11 @@ impl Database {
     /// Resolved by `library_id` rather than by reusing the library row's id:
     /// the two ids are allocated independently, so looking the root up by id
     /// silently returns nothing.
+    ///
+    /// Scoped to the `UserView` kind on purpose. The scanner also writes
+    /// `Series` and `Season` rows as folders inside a TV library; matching on
+    /// `is_folder = 1` alone would surface every one of them as a top-level
+    /// library in the sidebar and on the home screen.
     pub async fn library_root_items(
         &self,
         library_ids: &[String],
@@ -449,7 +454,8 @@ impl Database {
         // Only the generated placeholder list is interpolated; every id is
         // bound as a parameter.
         let sql = AssertSqlSafe(format!(
-            "SELECT * FROM items WHERE library_id IN ({holes}) AND is_folder = 1 \
+            "SELECT * FROM items
+             WHERE library_id IN ({holes}) AND is_folder = 1 AND kind = 'UserView'
              ORDER BY name COLLATE NOCASE"
         ));
 
@@ -855,6 +861,69 @@ mod tests {
 
         assert!(!FieldSelection::parse(None).overview);
         assert!(FieldSelection::all().overview);
+    }
+
+    async fn insert_library(db: &Database, id: &str, name: &str, collection_type: &str) {
+        sqlx::query(
+            "INSERT INTO libraries (id, name, path, collection_type, created_at, enabled)
+             VALUES (?, ?, ?, ?, '2024-01-01T00:00:00Z', 1)",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(format!("/media/{id}"))
+        .bind(collection_type)
+        .execute(db.pool())
+        .await
+        .expect("insert library");
+    }
+
+    async fn insert_item(
+        db: &Database,
+        id: &str,
+        library_id: &str,
+        kind: &str,
+        name: &str,
+        path: &str,
+        parent_id: Option<&str>,
+        is_folder: bool,
+    ) {
+        sqlx::query(
+            "INSERT INTO items (id, library_id, kind, name, path, parent_id, is_folder)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(id)
+        .bind(library_id)
+        .bind(kind)
+        .bind(name)
+        .bind(path)
+        .bind(parent_id)
+        .bind(is_folder as i64)
+        .execute(db.pool())
+        .await
+        .expect("insert item");
+    }
+
+    /// `/Views` is the navigation root: it must list exactly one entry per
+    /// library, never every Series/Season folder the scanner happened to
+    /// create inside one.
+    #[tokio::test]
+    async fn views_lists_library_roots_not_inner_folders() {
+        let db = Database::connect_memory().await.expect("db");
+        insert_library(&db, "lib-1", "Movies", "movies").await;
+
+        insert_item(&db, "root", "lib-1", "UserView", "Movies", "/media/lib-1", None, true).await;
+        // A TV-style tree: nothing here is a library of its own.
+        insert_item(&db, "series", "lib-1", "Series", "Twin Peaks", "/media/lib-1/Twin Peaks", Some("root"), true).await;
+        insert_item(&db, "season", "lib-1", "Season", "Season 1", "/media/lib-1/Twin Peaks/Season 1", Some("series"), true).await;
+        insert_item(&db, "ep", "lib-1", "Episode", "Pilot", "/media/lib-1/Twin Peaks/Season 1/e1.mkv", Some("season"), false).await;
+
+        let views = db
+            .library_root_items(&["lib-1".to_owned()], "user-1", "server-1")
+            .await
+            .expect("library views");
+
+        let ids: Vec<&str> = views.iter().map(|v| v.id.as_str()).collect();
+        assert_eq!(ids, vec!["root"], "only the library root is a view, got {ids:?}");
     }
 
     #[test]
